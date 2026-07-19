@@ -19,27 +19,36 @@ scope = ["https://spreadsheets.google.com/feeds",
 creds = None
 
 # [이중 안전장치] 1단계: Secrets에 설정이 있는지 확인 (웹 배포용)
+# 무조건 최상단 위치
+st.set_page_config(layout="wide")
+
+scope = ["https://spreadsheets.google.com/feeds",
+         "https://www.googleapis.com/auth/drive"]
+
+creds = None
+
+# [🔐 완벽 매칭 호환 로직] 1단계: Secrets에 직통으로 type이 있는지 확인
 try:
-    if "gcp_service_account" in st.secrets:
+    if "type" in st.secrets:
         creds_dict = {
-            "type": st.secrets["gcp_service_account"]["type"],
-            "project_id": st.secrets["gcp_service_account"]["project_id"],
-            "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
-            "private_key": st.secrets["gcp_service_account"]["private_key"].replace("\\n", "\n"),
-            "client_email": st.secrets["gcp_service_account"]["client_email"],
-            "client_id": st.secrets["gcp_service_account"]["client_id"],
-            "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
-            "token_uri": st.secrets["gcp_service_account"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"],
-            "universe_domain": st.secrets["gcp_service_account"]["universe_domain"]
+            "type": st.secrets["type"],
+            "project_id": st.secrets["project_id"],
+            "private_key_id": st.secrets["private_key_id"],
+            "private_key": st.secrets["private_key"].replace("\\n", "\n"),
+            "client_email": st.secrets["client_email"],
+            "client_id": st.secrets["client_id"],
+            "auth_uri": st.secrets["auth_uri"],
+            "token_uri": st.secrets["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["client_x509_cert_url"],
+            "universe_domain": st.secrets["universe_domain"]
         }
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    # Secrets가 없으면 로컬 파일로 시도 (로컬용)
     else:
+        # 내 컴퓨터(로컬)에서는 파일로 인증
         creds = ServiceAccountCredentials.from_json_keyfile_name("Ch1.json", scope)
 except Exception:
-    # 혹시라도 Secrets 체크 중 에러가 나면 최종적으로 로컬 파일 한번 더 시도
+    # 만약 웹 배포 환경에서 미세한 오타 등으로 튕겼을 때를 대비한 최종 백업
     try:
         creds = ServiceAccountCredentials.from_json_keyfile_name("Ch1.json", scope)
     except Exception as e:
