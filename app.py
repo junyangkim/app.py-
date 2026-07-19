@@ -1,5 +1,6 @@
 from datetime import datetime
 import io
+import json
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -9,18 +10,66 @@ import streamlit as st
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+# =========================================================
+# 🚨 [중요] Streamlit 설정은 무조건 코드 최상단에 위치해야 합니다.
+# =========================================================
+st.set_page_config(layout="wide")
+
 # 구글 API 접근 범위 정의
 scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
-# JSON 인증 파일 불러오기 (파일명 Ch1.json으로 맞추기)
-creds = ServiceAccountCredentials.from_json_keyfile_name("Ch1.json", scope)
+# =========================================================
+# 🔐 [보완] 로컬(Ch1.json)과 배포(Secrets) 겸용 완벽 호환 인증 로직
+# =========================================================
+creds = None
+
+# 1차 시도: 로컬 환경용 (Ch1.json 파일이 최상위 폴더에 존재하는지 먼저 확인)
+try:
+    creds = ServiceAccountCredentials.from_json_keyfile_name("Ch1.json", scope)
+except Exception:
+    # 2차 시도: 로컬에 파일이 없으면 웹 배포 환경(Secrets)으로 전환
+    try:
+        if "gcp_service_account" in st.secrets:
+            creds_dict = {
+                "type": st.secrets["gcp_service_account"]["type"],
+                "project_id": st.secrets["gcp_service_account"]["project_id"],
+                "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
+                "private_key": st.secrets["gcp_service_account"]["private_key"].replace("\\n", "\n"),
+                "client_email": st.secrets["gcp_service_account"]["client_email"],
+                "client_id": st.secrets["gcp_service_account"]["client_id"],
+                "auth_uri": st.secrets["gcp_service_account"]["auth_uri"],
+                "token_uri": st.secrets["gcp_service_account"]["token_uri"],
+                "auth_provider_x509_cert_url": st.secrets["gcp_service_account"]["auth_provider_x509_cert_url"],
+                "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"],
+                "universe_domain": st.secrets["gcp_service_account"]["universe_domain"]
+            }
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    except Exception as secrets_err:
+        st.error(f"🚨 배포 환경 인증 정보(Secrets)에 문제가 있습니다: {secrets_err}")
+        st.stop()
+
+# 둘 다 실패했을 경우 예외 처리
+if creds is None:
+    st.error("🚨 인증 수단을 찾을 수 없습니다. 로컬의 'Ch1.json' 파일 또는 배포 환경의 'Secrets' 설정을 확인해주세요.")
+    st.stop()
+
 client = gspread.authorize(creds)
 
 
+# =========================================================
+# 🗂️ 구글 스프레드시트 로드 함수 (이름/ID 이중 안전장치)
+# =========================================================
 @st.cache_data(ttl=3600) 
 def load_all_sheets():
-    spreadsheet = client.open("Ch1")
+    try:
+        # 우선 가장 확실한 고유 시트 ID 기반으로 접근 시도
+        # 💡 ("여기에_실제_시트_ID_넣기" 부분을 회원님의 시트 ID 주소값으로 변경해 쓰시는 것을 권장합니다)
+        spreadsheet = client.open_by_key("여기에_실제_시트_ID_넣기")
+    except Exception:
+        # 시트 ID 접근이 실패하거나 기본 상태면 기존 로컬 방식인 이름("Ch1")으로 접근
+        spreadsheet = client.open("Ch1")
+        
     sheet_names = ["C1", "C2", "C3", "C4", "C5"]
     dfs = {
         name.lower(): pd.DataFrame(spreadsheet.worksheet(name).get_all_records())
@@ -28,45 +77,35 @@ def load_all_sheets():
     }
     return dfs
 
-
-# 옵션셋팅
-# (1)페이지 기본 설정 (전체 화면을 넓게 쓰기 위해 wide 모드 설정)
-st.set_page_config(layout="wide")
-# (2)ISO 주차 끌고오기
+# (2) ISO 주차 끌고오기
 iso_year, iso_week, iso_weekday = datetime.now().isocalendar()
+
 # (3) 사이드바에 주차 선택 옵션 추가
 with st.sidebar:
-    # 1. 사이드바 메인 타이틀 및 로고 가시성 확보
     st.markdown("## ⚙️ 분석 필터 셋팅")
     st.caption("대시보드에 표시될 데이터의 조회 조건을 설정하세요.")
     st.markdown("---")
     
-    # 2. 주차 선택 영역을 테두리 상자로 감싸 고급스럽게 강조
     with st.container(border=True):
         st.markdown("###  기간 설정")
         
-        # 주차 선택 selectbox (사용자 친화적 텍스트 포맷팅 적용)
         selected_week = st.selectbox(
             "조회 주차 선택",
             options=list(range(1, 53)),
-            index=iso_week - 1,  # 기본값: 오늘 기준 ISO 주차
+            index=iso_week - 1,
             format_func=lambda x: f" 제 {x}주차 (W{x:02d})"
         )
         
-        # 3. 현재 선택된 주차에 대한 동적 컨텍스트 알림 뱃지
         if selected_week == iso_week:
-            st.info(f"✨ **금일 기준 주차(W{iso_week:02d})** 데이터 조회 모드입니다. .")
+            st.info(f"✨ **금일 기준 주차(W{iso_week:02d})** 데이터 조회 모드입니다.")
         else:
             st.warning(f"🔍 **과거 주차(W{selected_week:02d})** 데이터 조회 모드입니다. (현재: W{iso_week:02d}주차)")
 
     st.markdown("---")
-    
-    # 4. (옵션) 하단에 시스템 정보 브랜딩 추가
     st.caption(f"📌 **마지막 동기화:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     st.caption("🔒 본 자료는 사내 공유용 보안 문서입니다.")
 
 
-# [최상단] 타이틀 및 서브타이틀 (상단 영역에 밀착)
 st.title("📦 물류 핵심 지표(KPI) 통합 대시보드")
 st.caption("🚀 4대 지표 종합 모니터링 시스템")
 st.markdown("")
@@ -75,52 +114,32 @@ CHART_HEIGHT = 280
 
 st.markdown(f"### 📅 {selected_week}주차의 전국 실적")
 
-# =========================================================
-# 🗂️ 시트 데이터 가져오기 
-# =========================================================
-
-# 모든 시트 불러오기
+# 데이터 동기화
 all_data = load_all_sheets()
-
-# [메인 페이지] 공용 냉장고에 "my_data"라는 이름으로 구글 시트 데이터를 넣어둠
 st.session_state["all_data"] = all_data 
 
+all_weeks = pd.DataFrame({"주차": range(1, 53)})
 
-# =========================================================
-# 🗂️ 2x2 레이아웃 구성을 위한 행(Row) 분할
-# =========================================================
 row1_col1, row1_col2 = st.columns([50, 50])
 row2_col1, row2_col2 = st.columns([50, 50])
 
-
 # -----------------------------------------------------
-# [칼럼1] 정시배송율 KPI (정시배송 합 / 총배송 합 방식)
+# [칼럼1] 정시배송율 KPI
 # -----------------------------------------------------
-
-# 필요한 시트 꺼내오기
-df_c1 = all_data["c1"]   # 이제 df_c1이 정의됨
-
+df_c1 = all_data["c1"]
 with row1_col1:
     current_df = df_c1[df_c1["주차"] == selected_week]
     current_total = current_df["총배송"].sum()
     current_ontime = current_df["정시배송"].sum()
     current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
 
-    
-    # 분모가 0이 되는 것을 방지하면서 비율(%) 계산
-    current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
-
-    # 2) 직전 주차(전주) 필터링 및 합계 계산
     prev_df = df_c1[df_c1["주차"] == (selected_week - 1)]
     prev_total = prev_df["총배송"].sum()
     prev_ontime = prev_df["정시배송"].sum()
-    
     prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
 
-    # 3) 전주 대비 차이(Delta) 계산
     delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
 
-    # 4) Streamlit Metric UI 출력
     with st.container(border=True):
         st.metric(
             label="정시배송율",
@@ -129,54 +148,35 @@ with row1_col1:
             delta_color="normal"
         )
 
-        # 52주 전체 추이 계산
-        weekly_otd = (df_c1.groupby("주차").apply(lambda g: (g["정시배송"].sum() / g["총배송"].sum() * 100) if g["총배송"].sum() > 0 else 0)
-        ).reset_index(name="정시배송율_실적")
-
-        # 모든 주차(1~52) 생성 후 merge
-        all_weeks = pd.DataFrame({"주차": range(1, 53)})
-        weekly_otd_full = all_weeks.merge(weekly_otd, on="주차", how="left")
-        # 결측치(NaN)는 0으로 채움
-        weekly_otd_full["정시배송율_실적"] = weekly_otd_full["정시배송율_실적"].fillna(0)
-   
+        weekly_otd = (df_c1.groupby("주차").apply(lambda g: (g["정시배송"].sum() / g["총배송"].sum() * 100) if g["총배송"].sum() > 0 else 0)).reset_index(name="정시배송율_실적")
+        weekly_otd_full = all_weeks.merge(weekly_otd, on="주차", how="left").fillna(0)
    
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
-            x=weekly_otd_full["주차"], y=weekly_otd_full["정시배송율_실적"],
-            mode='lines', name='정시배송율',
-            line=dict(color='#10B981', width=2.5, shape='spline'),
-            fill='tozeroy', fillcolor='rgba(16, 185, 129, 0.1)',
-            # 💡 마우스 오버 템플릿 설정
-           hovertemplate="주차: %{x}<br>실적: %{y}%<extra></extra>"
+            x=weekly_otd_full["주차"], y=weekly_otd_full["정시배송율_실적"], mode='lines', name='정시배송율',
+            line=dict(color='#10B981', width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(16, 185, 129, 0.1)',
+            hovertemplate="주차: %{x}<br>실적: %{y}%<extra></extra>"
         ))
-        fig1.update_layout(
-            margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT,
-            xaxis=dict(showgrid=True), yaxis=dict(showgrid=True)
-        )
+        fig1.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT, xaxis=dict(showgrid=True), yaxis=dict(showgrid=True))
         st.plotly_chart(fig1, use_container_width=True)
 
 # -----------------------------------------------------
-# [칼럼2] 결품율 KPI + 라인 그래프
+# [칼럼2] 미납율 KPI
 # -----------------------------------------------------
 df_c2 = all_data["c2"]
-
 with row1_col2:
-    # 1) 해당 주차 필터링 및 합계 계산
     current_df = df_c2[df_c2["주차"] == selected_week]
     current_total = current_df["발주금액"].sum()
     current_ontime = current_df["출하금액"].sum()
     current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
 
-    # 2) 직전 주차(전주) 필터링 및 합계 계산
     prev_df = df_c2[df_c2["주차"] == (selected_week - 1)]
     prev_total = prev_df["발주금액"].sum()
     prev_ontime = prev_df["출하금액"].sum()
     prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
 
-    # 3) 전주 대비 차이(Delta) 계산
     delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
 
-    # 4) Streamlit Metric UI 출력
     with st.container(border=True):
         st.metric(
             label="미납율",
@@ -185,62 +185,35 @@ with row1_col2:
             delta_color="normal"
         )
 
-    # 5) 52주 전체 추이 계산 (결품율 = (발주금액 - 출하금액) / 발주금액 * 100)
-        weekly_stockout = (
-        df_c2.groupby("주차").apply(
-            lambda g: ((g["발주금액"].sum() - g["출하금액"].sum()) / g["발주금액"].sum() * 100)
-            if g["발주금액"].sum() > 0 else 0
-            )
-        ).reset_index(name="결품율_실적")
+        weekly_stockout = (df_c2.groupby("주차").apply(lambda g: ((g["발주금액"].sum() - g["출하금액"].sum()) / g["발주금액"].sum() * 100) if g["발주금액"].sum() > 0 else 0)).reset_index(name="결품율_실적")
+        weekly_stockout_full = all_weeks.merge(weekly_stockout, on="주차", how="left").fillna(0)
 
-    # 모든 주차(1~52) 생성 후 merge
-        all_weeks = pd.DataFrame({"주차": range(1, 53)})
-        weekly_stockout_full = all_weeks.merge(weekly_stockout, on="주차", how="left")
-        weekly_stockout_full["결품율_실적"] = weekly_stockout_full["결품율_실적"].fillna(0)
-
-    # 6) 그래프 생성
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(
-           x=weekly_stockout_full["주차"], y=weekly_stockout_full["결품율_실적"],
-           mode='lines', name='결품율',
-           line=dict(color='#EF4444', width=2.5, shape='spline'),
-           fill='tozeroy', fillcolor='rgba(239, 68, 68, 0.1)',
-            # 💡 마우스 오버 템플릿 설정
+           x=weekly_stockout_full["주차"], y=weekly_stockout_full["결품율_실적"], mode='lines', name='결품율',
+           line=dict(color='#EF4444', width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(239, 68, 68, 0.1)',
            hovertemplate="주차: %{x}<br>실적: %{y}%<extra></extra>"        
         ))
-        fig2.update_layout(
-           margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT,
-           xaxis=dict(showgrid=True, title="주차"),
-           yaxis=dict(showgrid=True, title="결품율 (%)", range=[0, 30], dtick=3),
-           plot_bgcolor='white', paper_bgcolor='white'
-        )
-
+        fig2.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT, xaxis=dict(showgrid=True, title="주차"), yaxis=dict(showgrid=True, title="결품율 (%)", range=[0, 30], dtick=3), plot_bgcolor='white', paper_bgcolor='white')
         st.plotly_chart(fig2, use_container_width=True)
 
-
 # -----------------------------------------------------
-# [칼럼 3] 미오출율 KPI + 라인 그래프
+# [칼럼 3] 미오출율 KPI
 # -----------------------------------------------------
-
 df_c3 = all_data["c3"]
-
 with row2_col1:
-    # 1) 해당 주차 필터링 및 합계 계산
     current_df = df_c3[df_c3["주차"] == selected_week]
     current_total = current_df["출하금액"].sum()
     current_ontime = current_df["점포확정금액"].sum()
     current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
 
-    # 2) 직전 주차(전주) 필터링 및 합계 계산
     prev_df = df_c3[df_c3["주차"] == (selected_week - 1)]
     prev_total = prev_df["출하금액"].sum()
     prev_ontime = prev_df["점포확정금액"].sum()
     prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
 
-    # 3) 전주 대비 차이(Delta) 계산
     delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
 
-    # 4) Streamlit Metric UI 출력
     with st.container(border=True):
         st.metric(
             label="미오출율",
@@ -249,107 +222,51 @@ with row2_col1:
             delta_color="normal"
         )
 
-    # 5) 52주 전체 추이 계산 (미오출율 = (발주금액 - 출하금액) / 발주금액 * 100)
-        weekly_stockout = (
-        df_c3.groupby("주차").apply(
-            lambda g: ((g["출하금액"].sum() - g["점포확정금액"].sum()) / g["출하금액"].sum() * 100)
-            if g["출하금액"].sum() > 0 else 0
-            )
-        ).reset_index(name="미오출율_실적")
+        weekly_stockout3 = (df_c3.groupby("주차").apply(lambda g: ((g["출하금액"].sum() - g["점포확정금액"].sum()) / g["출하금액"].sum() * 100) if g["출하금액"].sum() > 0 else 0)).reset_index(name="미오출율_실적")
+        weekly_stockout_full3 = all_weeks.merge(weekly_stockout3, on="주차", how="left").fillna(0)
 
-    # 모든 주차(1~52) 생성 후 merge
-        all_weeks = pd.DataFrame({"주차": range(1, 53)})
-        weekly_stockout_full = all_weeks.merge(weekly_stockout, on="주차", how="left")
-        weekly_stockout_full["미오출율_실적"] = weekly_stockout_full["미오출율_실적"].fillna(0)
-
-    # 6) 그래프 생성
         fig3 = go.Figure()
         fig3.add_trace(go.Scatter(
-           x=weekly_stockout_full["주차"], y=weekly_stockout_full["미오출율_실적"],
-           mode='lines', name='미오출율',
-           line=dict(color="#4563F7", width=2.5, shape='spline'),
-           fill='tozeroy', fillcolor='rgba(69, 99, 247, 0.1)',
-        # 💡 마우스 오버 템플릿 설정
+           x=weekly_stockout_full3["주차"], y=weekly_stockout_full3["미오출율_실적"], mode='lines', name='미오출율',
+           line=dict(color="#4563F7", width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(69, 99, 247, 0.1)',
            hovertemplate="주차: %{x}<br>실적: %{y}%<extra></extra>"
-        
         ))
-        fig3.update_layout(
-           margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT,
-           xaxis=dict(showgrid=True, title="주차"),
-           yaxis=dict(showgrid=True, title="미오출율 (%)", range=[0, 30], dtick=3),
-           plot_bgcolor='white', paper_bgcolor='white'
-        )
-
+        fig3.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT, xaxis=dict(showgrid=True, title="주차"), yaxis=dict(showgrid=True, title="미오출율 (%)", range=[0, 30], dtick=3), plot_bgcolor='white', paper_bgcolor='white')
         st.plotly_chart(fig3, use_container_width=True)
 
 # -----------------------------------------------------
-# [칼럼 4] VOC(클레임) 인입 KPI + 막대 그래프
+# [칼럼 4] VOC(클레임) 인입 KPI
 # -----------------------------------------------------
 df_c4 = all_data["c4"]
-
 with row2_col2:
-    # 현재 주차 및 전주 VOC 건수 합산
     current_sum_voc = df_c4.loc[df_c4["주차"] == selected_week, "VOC_건수"].sum()
     prev_sum_voc = df_c4.loc[df_c4["주차"] == (selected_week - 1), "VOC_건수"].sum()
 
-    # 증감 계산 (데이터 없을 경우 None 처리)
     current_sum_voc = current_sum_voc if current_sum_voc > 0 else None
     prev_sum_voc = prev_sum_voc if prev_sum_voc > 0 else None
-    delta_voc = (
-        current_sum_voc - prev_sum_voc
-        if current_sum_voc is not None and prev_sum_voc is not None
-        else None
-    )
+    delta_voc = (current_sum_voc - prev_sum_voc if current_sum_voc is not None and prev_sum_voc is not None else None)
 
     with st.container(border=True):
-        # KPI 메트릭 표시
         st.metric(
             label="VOC 실적",
             value=f"{current_sum_voc:,.0f}건" if current_sum_voc is not None else "데이터 없음",
             delta=f"{delta_voc:+.0f}건 (전주 대비)" if delta_voc is not None else "데이터 없음",
-            delta_color="inverse"  # 낮을수록 좋은 지표
+            delta_color="inverse"
         )
 
-        # 52주 전체 VOC 합산 추이
         weekly_voc = df_c4.groupby("주차")["VOC_건수"].sum().reset_index()
         weekly_voc_full = all_weeks.merge(weekly_voc, on="주차", how="left").fillna(0)
 
-        # 막대 그래프 시각화
         fig4 = go.Figure()
         fig4.add_trace(go.Bar(
-            x=weekly_voc_full["주차"],
-            y=weekly_voc_full["VOC_건수"],
-            name="VOC 건수",
-            marker_color="rgba(138, 43, 226, 0.85)",  # 보라색 계열 (BlueViolet)
-            opacity=0.85,
-        # 💡 마우스 오버 템플릿 설정
+            x=weekly_voc_full["주차"], y=weekly_voc_full["VOC_건수"], name="VOC 건수",
+            marker_color="rgba(138, 43, 226, 0.85)", opacity=0.85,
             hovertemplate="주차: %{x}<br>실적: %{y}건<extra></extra>"
         ))
-
-        
-        fig4.update_layout(
-            margin=dict(l=50, r=50, t=50, b=50),
-            height=CHART_HEIGHT,
-            xaxis=dict(
-            showgrid=True,  
-            title="주차" # 가로축 레이블
-            #tickmode="linear" # 주차가 연속 숫자라면 눈금 간격 일정하게
-            ),
-            yaxis=dict(
-            showgrid=True,
-            range=[0,60],   # 세로축 범위 0~60
-            dtick=15,        # 세로축 단위 간격
-            tickformat="d", # 정수만 표시
-            title=""
-            ),
-)
-
+        fig4.update_layout(margin=dict(l=50, r=50, t=50, b=50), height=CHART_HEIGHT, xaxis=dict(showgrid=True, title="주차"), yaxis=dict(showgrid=True, range=[0,60], dtick=15, tickformat="d", title=""))
         st.plotly_chart(fig4, use_container_width=True)
 
-
 st.markdown("---")
-
-
 # =========================================================
 # 하단 영역
 # =========================================================
