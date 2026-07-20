@@ -19,9 +19,6 @@ scope = ["https://spreadsheets.google.com/feeds",
 creds = None
 
 # [이중 안전장치] 1단계: Secrets에 설정이 있는지 확인 (웹 배포용)
-# 무조건 최상단 위치
-st.set_page_config(layout="wide")
-
 scope = ["https://spreadsheets.google.com/feeds",
          "https://www.googleapis.com/auth/drive"]
 
@@ -61,7 +58,7 @@ if creds is None:
 
 client = gspread.authorize(creds)
 
-@st.cache_data(ttl=3600) 
+@st.cache_data(ttl=3600)
 def load_all_sheets():
     try:
         # 고유 시트 ID 기반 접근 시도
@@ -70,11 +67,20 @@ def load_all_sheets():
         # 실패 시 기존 로컬 방식인 이름("Ch1")으로 접근
         spreadsheet = client.open("Ch1")
         
-    sheet_names = ["C1", "C2", "C3", "C4", "C5"]
-    dfs = {
-        name.lower(): pd.DataFrame(spreadsheet.worksheet(name).get_all_records())
-        for name in sheet_names
-    }
+    sheet_names = ["C1", "C2", "C3", "C4", "C5", "C6"]
+    dfs = {}
+    
+    for name in sheet_names:
+        try:
+            worksheet = spreadsheet.worksheet(name)
+            records = worksheet.get_all_records()
+            # 레코드가 있으면 데이터프레임 변환, 없으면 빈 데이터프레임 생성
+            dfs[name.lower()] = pd.DataFrame(records) if records else pd.DataFrame()
+        except Exception as e:
+            # 특정 시트 로드 실패 시 에러 메시지만 출력하고 전체 앱이 멈추는 것을 방지
+            st.warning(f"⚠️ '{name}' 시트를 불러오지 못했습니다. (원인: {e})")
+            dfs[name.lower()] = pd.DataFrame()
+            
     return dfs
 
 # --- 이하 대시보드 UI/차트 코드 (기존과 동일) ---
