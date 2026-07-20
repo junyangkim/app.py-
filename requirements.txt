@@ -2,9 +2,12 @@ pandas
 numpy
 plotly
 streamlit
+folium
+streamlit-folium
 gspread
 oauth2client
 google-api-python-client
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
+openpyxl
