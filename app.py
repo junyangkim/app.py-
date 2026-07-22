@@ -83,6 +83,7 @@ def load_all_sheets():
             
     return dfs
 
+
 # --- 이하 대시보드 UI/차트 코드 (기존과 동일) ---
 iso_year, iso_week, iso_weekday = datetime.now().isocalendar()
 
@@ -111,352 +112,380 @@ st.caption("🚀 4대 지표 종합 모니터링 시스템")
 st.markdown("")
 
 CHART_HEIGHT = 280  
-st.markdown(f"### 📅 {selected_week}주차의 전국 실적")
+
+# =========================================================
+# 구글 시트 헤더 자동 대응 함수 (가로형 컬럼 찾기)
+# =========================================================
+def get_week_col_name(df, week_num):
+    w_str = str(week_num)
+    w_label = f"{week_num}주차"
+    w_w = f"W{week_num:02d}"
+    if w_str in df.columns:
+        return w_str
+    elif w_label in df.columns:
+        return w_label
+    elif w_w in df.columns:
+        return w_w
+    return None
+
+# =========================================================
+# 0. 기본 설정 및 데이터 준비
+# =========================================================
+# 차트 높이 설정
+CHART_HEIGHT = 220
 
 all_data = load_all_sheets()
-st.session_state["all_data"] = all_data 
-all_weeks = pd.DataFrame({"주차": range(1, 53)})
+st.session_state["all_data"] = all_data
 
-row1_col1, row1_col2 = st.columns([50, 50])
-row2_col1, row2_col2 = st.columns([50, 50])
-
-# [칼럼1] 정시배송율 KPI
+# =========================================================
+# 상단 KPI 카드 + 그래프 (전국 평균 기반)
+# =========================================================
 df_c1 = all_data["c1"]
-with row1_col1:
-    current_df = df_c1[df_c1["주차"] == selected_week]
-    current_total = current_df["총배송"].sum()
-    current_ontime = current_df["정시배송"].sum()
-    current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
-    prev_df = df_c1[df_c1["주차"] == (selected_week - 1)]
-    prev_total = prev_df["총배송"].sum()
-    prev_ontime = prev_df["정시배송"].sum()
-    prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
-    delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
-
-    with st.container(border=True):
-        st.metric(label="정시배송율", value=f"{current_avg:.2f}%" if current_avg is not None else "데이터 없음", delta=f"{delta_value:+.2f}%p (전주 대비)" if delta_value is not None else "데이터 없음")
-        weekly_otd = (df_c1.groupby("주차").apply(lambda g: (g["정시배송"].sum() / g["총배송"].sum() * 100) if g["총배송"].sum() > 0 else 0)).reset_index(name="정시배송율_실적")
-        weekly_otd_full = all_weeks.merge(weekly_otd, on="주차", how="left").fillna(0)
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(x=weekly_otd_full["주차"], y=weekly_otd_full["정시배송율_실적"], mode='lines', line=dict(color='#10B981', width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(16, 185, 129, 0.1)'))
-        fig1.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT)
-        st.plotly_chart(fig1, use_container_width=True)
-
-# [칼럼2] 미납율 KPI
 df_c2 = all_data["c2"]
-with row1_col2:
-    current_df = df_c2[df_c2["주차"] == selected_week]
-    current_total = current_df["발주금액"].sum()
-    current_ontime = current_df["출하금액"].sum()
-    current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
-    prev_df = df_c2[df_c2["주차"] == (selected_week - 1)]
-    prev_total = prev_df["발주금액"].sum()
-    prev_ontime = prev_df["출하금액"].sum()
-    prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
-    delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
-
-    with st.container(border=True):
-        st.metric(label="미납율", value=f"{current_avg:.2f}%" if current_avg is not None else "데이터 없음", delta=f"{delta_value:+.2f}%p (전주 대비)" if delta_value is not None else "데이터 없음")
-        weekly_stockout = (df_c2.groupby("주차").apply(lambda g: ((g["발주금액"].sum() - g["출하금액"].sum()) / g["발주금액"].sum() * 100) if g["발주금액"].sum() > 0 else 0)).reset_index(name="결품율_실적")
-        weekly_stockout_full = all_weeks.merge(weekly_stockout, on="주차", how="left").fillna(0)
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=weekly_stockout_full["주차"], y=weekly_stockout_full["결품율_실적"], mode='lines', line=dict(color='#EF4444', width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(239, 68, 68, 0.1)'))
-        fig2.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT, yaxis=dict(range=[0, 30]))
-        st.plotly_chart(fig2, use_container_width=True)
-
-# [칼럼3] 미오출율 KPI
 df_c3 = all_data["c3"]
-with row2_col1:
-    current_df = df_c3[df_c3["주차"] == selected_week]
-    current_total = current_df["출하금액"].sum()
-    current_ontime = current_df["점포확정금액"].sum()
-    current_avg = (current_ontime / current_total * 100) if current_total > 0 else None
-    prev_df = df_c3[df_c3["주차"] == (selected_week - 1)]
-    prev_total = prev_df["출하금액"].sum()
-    prev_ontime = prev_df["점포확정금액"].sum()
-    prev_avg = (prev_ontime / prev_total * 100) if prev_total > 0 else None
-    delta_value = (current_avg - prev_avg) if (current_avg is not None and prev_avg is not None) else None
-
-    with st.container(border=True):
-        st.metric(label="미오출율", value=f"{current_avg:.2f}%" if current_avg is not None else "데이터 없음", delta=f"{delta_value:+.2f}%p (전주 대비)" if delta_value is not None else "데이터 없음")
-        weekly_stockout3 = (df_c3.groupby("주차").apply(lambda g: ((g["출하금액"].sum() - g["점포확정금액"].sum()) / g["출하금액"].sum() * 100) if g["출하금액"].sum() > 0 else 0)).reset_index(name="미오출율_실적")
-        weekly_stockout_full3 = all_weeks.merge(weekly_stockout3, on="주차", how="left").fillna(0)
-        fig3 = go.Figure()
-        fig3.add_trace(go.Scatter(x=weekly_stockout_full3["주차"], y=weekly_stockout_full3["미오출율_실적"], mode='lines', line=dict(color="#4563F7", width=2.5, shape='spline'), fill='tozeroy', fillcolor='rgba(69, 99, 247, 0.1)'))
-        fig3.update_layout(margin=dict(l=20, r=20, t=20, b=20), height=CHART_HEIGHT, yaxis=dict(range=[0, 30]))
-        st.plotly_chart(fig3, use_container_width=True)
-
-# [칼럼4] VOC KPI
 df_c4 = all_data["c4"]
-with row2_col2:
-    current_sum_voc = df_c4.loc[df_c4["주차"] == selected_week, "VOC_건수"].sum()
-    prev_sum_voc = df_c4.loc[df_c4["주차"] == (selected_week - 1), "VOC_건수"].sum()
-    current_sum_voc = current_sum_voc if current_sum_voc > 0 else None
-    prev_sum_voc = prev_sum_voc if prev_sum_voc > 0 else None
-    delta_voc = (current_sum_voc - prev_sum_voc if current_sum_voc is not None and prev_sum_voc is not None else None)
-
-    with st.container(border=True):
-        st.metric(label="VOC 실적", value=f"{current_sum_voc:,.0f}건" if current_sum_voc is not None else "데이터 없음", delta=f"{delta_voc:+.0f}건 (전주 대비)" if delta_voc is not None else "데이터 없음", delta_color="inverse")
-        weekly_voc = df_c4.groupby("주차")["VOC_건수"].sum().reset_index()
-        weekly_voc_full = all_weeks.merge(weekly_voc, on="주차", how="left").fillna(0)
-        fig4 = go.Figure()
-        fig4.add_trace(go.Bar(x=weekly_voc_full["주차"], y=weekly_voc_full["VOC_건수"], name="VOC 건수", marker_color="rgba(138, 43, 226, 0.85)"))
-        fig4.update_layout(margin=dict(l=50, r=50, t=50, b=50), height=CHART_HEIGHT, yaxis=dict(range=[0,60]))
-        st.plotly_chart(fig4, use_container_width=True)
-
-st.markdown("---")
-
-
 
 # =========================================================
-# 하단 영역
+# 상단 KPI 카드 + 그래프 (사각형 테두리 + 동일 폰트)
 # =========================================================
-st.markdown("### 🗺️ 전국 기준 주차별 실적")
 
-# 좌측과 우측의 비율로 분할
-bottom_col1, bottom_col2 = st.columns([6, 4])
-
-# -----------------------------------------------------
-# [좌측 컬럼 ]
-# -----------------------------------------------------
-
-df_c5 = all_data["c5"]
-
-with bottom_col1:
-    with st.container(border=True):
-        st.markdown("📊 **주차별 전국 실적 현황**")
-
-        # 1. 필요한 컬럼만 선택
-        view_columns = ["주차", "정시배송율", "미납율", "미오출율", "VOC 실적"]
-        df_view = df_c5[view_columns].copy()
-
-        # 2. 주차 값에 '주차' 붙여서 문자열로 변환
-        df_view["주차"] = df_view["주차"].astype(str) + "주차"
-
-        # 3. 데이터프레임 내부에 혹시 존재할 수 있는 불필요한 맨 왼쪽 열(예: Unnamed: 0 등)이 있다면 완전히 삭제
-        if "Unnamed: 0" in df_view.columns:
-            df_view = df_view.drop(columns=["Unnamed: 0"])
-
-        # 4. Streamlit의 column_config를 사용하여 모든 열의 값을 '가운데 정렬(center)'로 설정
-        column_configurations = {
-            col: st.column_config.Column(
-                alignment="center"  # 값을 테이블 정중앙에 정렬
-            )
-            for col in df_view.columns
-        }
-
-
-        # 좌측 영역과 높이(324px)를 맞추고, 인덱스를 숨겨 테이블 출력
-        st.dataframe(
-            df_view,
-            hide_index=True,                       # 맨 왼쪽의 행 번호(인덱스) 제거
-            column_config=column_configurations,    # 전 컬럼 가운데 정렬 적용
-            use_container_width=True,               # 컬럼 폭 균등 분배 및 부모 너비 맞춤
-            height=324                             # 좌측 컴포넌트와 세로 높이 동기화
-        )
-
-        # CSV 다운로드 기능 구현
-        csv_buffer = io.StringIO()
-        df_view.to_csv(csv_buffer, index=False, encoding="utf-8-sig")
-        csv_bytes = csv_buffer.getvalue().encode("utf-8-sig")
-
-        st.download_button(
-            label="📥 주차별 실적 DB 다운로드 (CSV)",
-            data=csv_bytes,
-            file_name="주차별_실적_현황.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-# -----------------------------------------------------
-# [우측 컬럼 ]
-# -----------------------------------------------------
-
-df_c5 = all_data["c5"]
-
-with bottom_col2:
-    # 선택한 주차에 해당하는 행 필터링
-    current_week_avg = df_c5[df_c5["주차"] == selected_week]
-
-# -----------------------------------------------------
-# [우측 컬럼 : 평균값 카드]
-# -----------------------------------------------------
-
-df_c5 = all_data["c5"]
-
-with bottom_col2:
-    # 구글시트 특정 셀 값 가져오기
-    avg_ontime = df_c5["정시배송율_평균"].iloc[0]
-    avg_non_delivery = df_c5["미납율_평균"].iloc[0]
-    avg_mis_delivery = df_c5["미오출율_평균"].iloc[0]
-    avg_voc = df_c5["VOC실적_평균"].iloc[0]
-
-    with st.container(border=False):
-        card_row1_col1, card_row1_col2, card_row1_col3, card_row1_col4 = st.columns(4)
-
-        with card_row1_col1:
-            st.metric(
-                label="🚚 정시배송율 (평균)",
-                value=f"{avg_ontime:.1f}%" if isinstance(avg_ontime, (int, float)) else str(avg_ontime)
-            )
-        with card_row1_col2:
-            st.metric(
-                label="⚠️ 미납율 (평균)",
-                value=f"{avg_non_delivery:.1f}%" if isinstance(avg_non_delivery, (int, float)) else str(avg_non_delivery)
-            )
-        with card_row1_col3:
-            st.metric(
-                label="🚨 미오출율 (평균)",
-                value=f"{avg_mis_delivery:.1f}%" if isinstance(avg_mis_delivery, (int, float)) else str(avg_mis_delivery)
-            )
-        with card_row1_col4:
-            st.metric(
-                label="📞 VOC 실적 (평균)",
-                value=f"{avg_voc}건" if isinstance(avg_voc, (int, float)) else str(avg_voc)
-            )
-
-# -----------------------------------------------------
-# [우측 컬럼 : Best / Worst 카드]
-# -----------------------------------------------------
-
-# CSS 스타일 정의 (가독성과 테마를 위한 스타일)
+# CSS 스타일 정의
 st.markdown("""
 <style>
-    .metric-card-best {
-        background-color: #E8F5E9; 
-        border-left: 5px solid #2E7D32; 
-        padding: 15px;
+    .metric-box {
+        border: 2px solid #cccccc;
         border-radius: 8px;
-        margin-bottom: 15px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+        padding: 12px;
+        margin-bottom: 20px;
+        box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
+        background-color: #f9f9f9;
     }
-    .metric-card-worst {
-        background-color: #FFEBEE; 
-        border-left: 5px solid #C62828; 
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    .metric-title {
+        font-size:18px;
+        font-weight:bold;
+        margin-bottom:6px;
+        text-align:center;
     }
-    .card-title {
-        font-size: 14px;
-        color: #555555;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }
-    .card-value {
-        font-size: 24px;
-        font-weight: 800;
-        color: #111111;
-        margin-bottom: 5px; /* 주차와의 간격을 위해 약간 늘림 */
-    }
-    /* 📅 주차 폰트 스타일 수정 완료! */
-    .card-week {
-        font-size: 24px;       /* 12px -> 15px로 확대 */
-        font-weight: bold;     /* 볼드체 추가 */
-        color: #444444;       /* 글자색을 약간 더 선명하게 조정 */
+    .metric-value {
+        font-size:18px;
+        font-weight:600;
+        margin-bottom:10px;
+        text-align:center;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# 주차 헤더 (폰트 크기 줄임)
+st.markdown(f"<h5 style='font-size:24px; font-weight:600;'>📅 {selected_week}주차의 전국 실적</h5>", unsafe_allow_html=True)
+
+# KPI 값 계산 함수
+def calc_avg(df, week_num):
+    col = get_week_col_name(df, week_num)
+    return pd.to_numeric(df[col], errors="coerce").mean() if col else None
+
+def calc_sum(df, week_num):
+    col = get_week_col_name(df, week_num)
+    return pd.to_numeric(df[col], errors="coerce").sum() if col else None
+
+# 주차 리스트
+weeks = [w for w in range(1, 53) if get_week_col_name(df_c1, w)]
+
+# 이전 주차(전주) 번호 계산 (1주차인 경우 비교 대상이 없으므로 None)
+prev_week = selected_week - 1 if selected_week > 1 else None
+
+# =========================================================
+# 상단 KPI 카드 + 그래프 (전주 대비 증감 포함)
+# =========================================================
+
+# 주차 리스트
+weeks = [w for w in range(1, 53) if get_week_col_name(df_c1, w)]
+
+# 이전 주차(전주) 번호 계산 (1주차인 경우 비교 대상이 없으므로 None)
+prev_week = selected_week - 1 if selected_week > 1 else None
+
+# 선택 주차 KPI 값 (현재)
+current_avg_c1 = calc_avg(df_c1, selected_week)
+current_avg_c2 = calc_avg(df_c2, selected_week)
+current_avg_c3 = calc_avg(df_c3, selected_week)
+current_sum_c4 = calc_sum(df_c4, selected_week)
+
+# 이전 주차 KPI 값 (전주)
+prev_avg_c1 = calc_avg(df_c1, prev_week) if prev_week else None
+prev_avg_c2 = calc_avg(df_c2, prev_week) if prev_week else None
+prev_avg_c3 = calc_avg(df_c3, prev_week) if prev_week else None
+prev_sum_c4 = calc_sum(df_c4, prev_week) if prev_week else None
+
+# 전주 대비 차이(Delta) 계산
+delta_c1 = (current_avg_c1 - prev_avg_c1) if (current_avg_c1 is not None and prev_avg_c1 is not None) else None
+delta_c2 = (current_avg_c2 - prev_avg_c2) if (current_avg_c2 is not None and prev_avg_c2 is not None) else None
+delta_c3 = (current_avg_c3 - prev_avg_c3) if (current_avg_c3 is not None and prev_avg_c3 is not None) else None
+delta_c4 = (current_sum_c4 - prev_sum_c4) if (current_sum_c4 is not None and prev_sum_c4 is not None) else None
+
+# 주차별 전체 추이 데이터
+avg_otd = [calc_avg(df_c1, w) for w in weeks]
+avg_nonpay = [calc_avg(df_c2, w) for w in weeks]
+avg_mis = [calc_avg(df_c3, w) for w in weeks]
+sum_voc = [calc_sum(df_c4, w) for w in weeks] 
+
+# --- KPI 카드 + 그래프 레이아웃 ---
+row1_col1, row1_col2 = st.columns(2)
+row2_col1, row2_col2 = st.columns(2)
+
+# [C1] 정시배송율 (높을수록 좋음 -> 기본 색상)
+with row1_col1:
+    with st.container(border=True):
+        st.metric(
+            label="🚚 정시배송율",
+            value=f"{current_avg_c1:.1f}%" if current_avg_c1 is not None else "N/A",
+            delta=f"{delta_c1:+.1f}%p (전주 대비)" if delta_c1 is not None else "전주 데이터 없음"
+        )
+        fig1 = go.Figure(go.Scatter(
+            x=weeks, 
+            y=avg_otd, 
+            mode="lines+markers",
+            line=dict(color='#1E88E5', width=3),
+            hovertemplate="주차:%{x}주차 , 실적:%{y:.1f}%<extra></extra>"
+        ))
+        fig1.update_layout(
+            height=CHART_HEIGHT, 
+            margin=dict(l=10, r=10, t=10, b=10),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+
+# [C2] 미납율 (낮을수록 좋음 -> delta_color="inverse")
+with row1_col2:
+    with st.container(border=True):
+        st.metric(
+            label="⚠️ 미납율",
+            value=f"{current_avg_c2:.1f}%" if current_avg_c2 is not None else "N/A",
+            delta=f"{delta_c2:+.1f}%p (전주 대비)" if delta_c2 is not None else "전주 데이터 없음",
+            delta_color="inverse"
+        )
+        fig2 = go.Figure(go.Scatter(
+            x=weeks, 
+            y=avg_nonpay, 
+            mode="lines+markers",
+            line=dict(color='#E53935', width=3),
+            hovertemplate="주차:%{x}주차 , 실적:%{y:.1f}%<extra></extra>"
+        ))
+        fig2.update_layout(
+            height=CHART_HEIGHT, 
+            margin=dict(l=10, r=10, t=10, b=10),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+# [C3] 미오출율 (낮을수록 좋음 -> delta_color="inverse")
+with row2_col1:
+    with st.container(border=True):
+        st.metric(
+            label="🚨 미오출율",
+            value=f"{current_avg_c3:.1f}%" if current_avg_c3 is not None else "N/A",
+            delta=f"{delta_c3:+.1f}%p (전주 대비)" if delta_c3 is not None else "전주 데이터 없음",
+            delta_color="inverse"
+        )
+        fig3 = go.Figure(go.Scatter(
+            x=weeks, 
+            y=avg_mis, 
+            mode="lines+markers",
+            line=dict(color='#FB8C00', width=3),
+            hovertemplate="주차:%{x}주차 , 실적:%{y:.1f}%<extra></extra>"
+        ))
+        fig3.update_layout(
+            height=CHART_HEIGHT, 
+            margin=dict(l=10, r=10, t=10, b=10),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+# [C4] VOC 실적 (낮을수록 좋음 -> delta_color="inverse")
+with row2_col2:
+    with st.container(border=True):
+        st.metric(
+            label="📞 VOC 건수",
+            value=f"{int(current_sum_c4)}건" if current_sum_c4 is not None else "N/A",
+            delta=f"{int(delta_c4):+d}건 (전주 대비)" if delta_c4 is not None else "전주 데이터 없음",
+            delta_color="inverse"
+        )
+        fig4 = go.Figure(go.Bar(
+            x=weeks, 
+            y=sum_voc, 
+            marker_color='#43A047',
+            hovertemplate="주차:%{x}주차 , 실적:%{y:,}건<extra></extra>"
+        ))
+        fig4.update_layout(
+            height=CHART_HEIGHT, 
+            margin=dict(l=10, r=10, t=10, b=10),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+
+
+# =========================================================
+# 하단 본문 영역
+# =========================================================
+st.markdown("---")
+st.markdown("### 🗺️ 전국 기준 주차별 실적")
+
+bottom_col1, bottom_col2 = st.columns([6, 4])
+
+# 1. 시트 데이터 가져오기 및 공백/빈값을 NaN으로 자동 변환 처리
+valid_weeks = weeks
+
+def get_clean_series(df, week_list, is_sum=False):
+    """시트의 공백/문자열/빈값을 NaN으로 다듬고 numeric으로 변환하는 함수"""
+    data = []
+    for w in week_list:
+        col = get_week_col_name(df, w)
+        if col and col in df.columns:
+            # pd.to_numeric(errors='coerce')는 값이 없거나 숫자가 아닌 경우 모두 NaN으로 변환합니다.
+            s = pd.to_numeric(df[col], errors='coerce')
+            
+            # min_count=1을 적용하여 전체가 NaN일 때는 0이 아닌 NaN을 반환 (VOC 0건 오류 방지)
+            val = s.sum(min_count=1) if is_sum else s.mean()
+            
+            # 결측치(NaN/NaT)인 경우 None 처리
+            data.append(val if pd.notna(val) else None)
+        else:
+            data.append(None)
+    return data
+
+weekly_otd = get_clean_series(df_c1, valid_weeks, is_sum=False)
+weekly_stockout = get_clean_series(df_c2, valid_weeks, is_sum=False)
+weekly_mis = get_clean_series(df_c3, valid_weeks, is_sum=False)
+weekly_voc = get_clean_series(df_c4, valid_weeks, is_sum=True)
+
+# ---------------------------------------------------------
+# [좌측 컬럼 : 주차별 실적 테이블 (선택 주차 노란 형광색 강조)]
+# ---------------------------------------------------------
+with bottom_col1:
+    with st.container(border=True):
+        st.markdown(f"📊 **주차별 전국 실적 현황** (현재 선택: **{selected_week}주차**)")
+
+    # 1. 데이터프레임 생성
+    df_view = pd.DataFrame({
+        "주차": [f"{w}주차" for w in valid_weeks],
+        "정시배송율": [f"{v:.1f}%" if pd.notna(v) else "-" for v in weekly_otd],
+        "미납율": [f"{v:.1f}%" if pd.notna(v) else "-" for v in weekly_stockout],
+        "미오출율": [f"{v:.1f}%" if pd.notna(v) else "-" for v in weekly_mis],
+        "VOC 실적": [f"{int(v)}건" if pd.notna(v) else "-" for v in weekly_voc]
+    })
+
+    # 2. 선택된 주차 행에 노란 형광색 스타일 적용 함수
+    target_week_label = f"{selected_week}주차"
+    
+    def highlight_selected_row(row):
+        # 현재 행의 '주차' 컬럼이 선택된 주차와 같으면 노란 형광색, 아니면 기본값
+        if row["주차"] == target_week_label:
+            # #FFF59D : 눈이 편안한 파스텔톤 노란색 (#FFFF00 으로 변경 시 선명한 형광노랑)
+            return ['background-color: #FFF59D; font-weight: bold; color: #000000;'] * len(row)
+        return [''] * len(row)
+
+    # 3. 스타일 적용
+    styled_df = df_view.style.apply(highlight_selected_row, axis=1)
+
+    column_configurations = {col: st.column_config.Column(alignment="center") for col in df_view.columns}
+
+    # 4. styled_df 전달
+    st.dataframe(
+        styled_df,
+        hide_index=True,
+        column_config=column_configurations,
+        use_container_width=True,
+        height=324
+    )
+
+    csv_buffer = io.StringIO()
+    df_view.to_csv(csv_buffer, index=False, encoding="utf-8-sig")
+    st.download_button(
+        label=f"📥 주차별 실적 DB 다운로드 (CSV)",
+        data=csv_buffer.getvalue().encode("utf-8-sig"),
+        file_name=f"주차별_실적_현황_W{selected_week:02d}.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+# ---------------------------------------------------------
+# [우측 컬럼 : 평균값 & Best/Worst 카드 (NaN 자동 제외)]
+# ---------------------------------------------------------
+st.markdown("""
+<style>
+    .metric-card-best {
+        background-color: #E8F5E9; border-left: 5px solid #2E7D32; 
+        padding: 12px; border-radius: 8px; margin-bottom: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    }
+    .metric-card-worst {
+        background-color: #FFEBEE; border-left: 5px solid #C62828;
+        padding: 12px; border-radius: 8px; margin-bottom: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+    }
+    .card-title { font-size: 13px; color: #555555; font-weight: bold; margin-bottom: 3px; }
+    .card-value { font-size: 20px; font-weight: 800; color: #111111; margin-bottom: 3px; }
+    .card-week { font-size: 13px; font-weight: bold; color: #444444; }
+</style>
+""", unsafe_allow_html=True)
+
 with bottom_col2:
-    # 1. 데이터 가져오기 (단위 중복 % 방지를 위해 필요시 데이터 값 확인 권장)
-    best_1 = df_c5["정시배송율_Best"].iloc[0]
-    best_2 = df_c5["미납율_Best"].iloc[0]
-    best_3 = df_c5["미오출율_Best"].iloc[0]
-    best_4 = df_c5["VOC실적_Best"].iloc[0]
+    # 💡 dropna()를 통해 NaN/None 값을 완벽하게 제거한 유효 데이터 Series 생성
+    s_otd = pd.Series(weekly_otd, index=valid_weeks).dropna()
+    s_stockout = pd.Series(weekly_stockout, index=valid_weeks).dropna()
+    s_mis = pd.Series(weekly_mis, index=valid_weeks).dropna()
+    s_voc = pd.Series(weekly_voc, index=valid_weeks).dropna()
 
-    worst_1 = df_c5["정시배송율_Worst"].iloc[0]
-    worst_2 = df_c5["미납율_Worst"].iloc[0]
-    worst_3 = df_c5["미오출율_Worst"].iloc[0]
-    worst_4 = df_c5["VOC실적_Worst"].iloc[0]
+    # 전체 기간 평균 (NaN이 제거된 상태에서 평균 계산)
+    avg_ontime = s_otd.mean() if not s_otd.empty else 0
+    avg_non_delivery = s_stockout.mean() if not s_stockout.empty else 0
+    avg_mis_delivery = s_mis.mean() if not s_mis.empty else 0
+    avg_voc = s_voc.mean() if not s_voc.empty else 0
+    sum_voc_total = s_voc.sum() if not s_voc.empty else 0
 
-    best_1_1 = df_c5["정시배송율_Best"].iloc[1]
-    best_2_1 = df_c5["미납율_Best"].iloc[1]
-    best_3_1 = df_c5["미오출율_Best"].iloc[1]
-    best_4_1 = df_c5["VOC실적_Best"].iloc[1]
+    card_row1_col1, card_row1_col2, card_row1_col3, card_row1_col4 = st.columns(4)
+    with card_row1_col1: st.metric("🚚 정시배송(전체기간평균)", f"{avg_ontime:.1f}%")
+    with card_row1_col2: st.metric("⚠️ 미납율(전체기간평균)", f"{avg_non_delivery:.1f}%")
+    with card_row1_col3: st.metric("🚨 미오출율(전체기간평균)", f"{avg_mis_delivery:.1f}%")
+    with card_row1_col4: st.metric("📞 VOC(전체기간합계)", f"{int(sum_voc_total):,}건")
 
-    worst_1_1 = df_c5["정시배송율_Worst"].iloc[1]
-    worst_2_1 = df_c5["미납율_Worst"].iloc[1]
-    worst_3_1 = df_c5["미오출율_Worst"].iloc[1]
-    worst_4_1 = df_c5["VOC실적_Worst"].iloc[1]
+    # 🚚 정시배송율 (높을수록 Best - idxmax/idxmin은 NaN을 알아서 제외함)
+    if not s_otd.empty:
+        b1_idx = s_otd.idxmax(); best_1 = f"{s_otd[b1_idx]:.1f}%"; best_1_1 = str(b1_idx)
+        w1_idx = s_otd.idxmin(); worst_1 = f"{s_otd[w1_idx]:.1f}%"; worst_1_1 = str(w1_idx)
+    else:
+        best_1 = worst_1 = "N/A"; best_1_1 = worst_1_1 = "-"
 
-    # 4개 열 레이아웃 구성
+    # ⚠️ 미납율 (낮을수록 Best)
+    if not s_stockout.empty:
+        b2_idx = s_stockout.idxmin(); best_2 = f"{s_stockout[b2_idx]:.1f}%"; best_2_1 = str(b2_idx)
+        w2_idx = s_stockout.idxmax(); worst_2 = f"{s_stockout[w2_idx]:.1f}%"; worst_2_1 = str(w2_idx)
+    else:
+        best_2 = worst_2 = "N/A"; best_2_1 = worst_2_1 = "-"
+
+    # 🚨 미오출율 (낮을수록 Best)
+    if not s_mis.empty:
+        b3_idx = s_mis.idxmin(); best_3 = f"{s_mis[b3_idx]:.1f}%"; best_3_1 = str(b3_idx)
+        w3_idx = s_mis.idxmax(); worst_3 = f"{s_mis[w3_idx]:.1f}%"; worst_3_1 = str(w3_idx)
+    else:
+        best_3 = worst_3 = "N/A"; best_3_1 = worst_3_1 = "-"
+
+    # 📞 VOC (적을수록 Best)
+    if not s_voc.empty:
+        b4_idx = s_voc.idxmin(); best_4 = f"{int(s_voc[b4_idx])}"; best_4_1 = str(b4_idx)
+        w4_idx = s_voc.idxmax(); worst_4 = f"{int(s_voc[w4_idx])}"; worst_4_1 = str(w4_idx)
+    else:
+        best_4 = worst_4 = "N/A"; best_4_1 = worst_4_1 = "-"
+
     col1, col2, col3, col4 = st.columns(4)
-
-    # --- 열 1: 정시배송율 ---
     with col1:
-        # Best 카드 (높을수록 좋으므로 초록색)
-        st.markdown(f"""
-        <div class="metric-card-best">
-            <div class="card-title">🚚 정시배송율 Best</div>
-            <div class="card-value">{best_1}</div>
-            <div class="card-week">📅 {best_1_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Worst 카드 (낮으므로 빨간색)
-        st.markdown(f"""
-        <div class="metric-card-worst">
-            <div class="card-title">🚚 정시배송율 Worst</div>
-            <div class="card-value">{worst_1}</div>
-            <div class="card-week">📅 {worst_1_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # --- 열 2: 미납율 ---
+        st.markdown(f'<div class="metric-card-best"><div class="card-title">🚚 정시배송 Best</div><div class="card-value">{best_1}</div><div class="card-week">📅 {best_1_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title">🚚 정시배송 Worst</div><div class="card-value">{worst_1}</div><div class="card-week">📅 {worst_1_1}주차</div></div>', unsafe_allow_html=True)
     with col2:
-        # 미납율은 '낮을수록' 좋은 지표이므로 Best(낮은 값)에 초록색 카드 적용
-        st.markdown(f"""
-        <div class="metric-card-best">
-            <div class="card-title">⚠️ 미납율 Best</div>
-            <div class="card-value">{best_2}</div>
-            <div class="card-week">📅 {best_2_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class="metric-card-worst">
-            <div class="card-title">⚠️ 미납율 Worst</div>
-            <div class="card-value">{worst_2}</div>
-            <div class="card-week">📅 {worst_2_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # --- 열 3: 미오출율 ---
+        st.markdown(f'<div class="metric-card-best"><div class="card-title">⚠️ 미납율 Best</div><div class="card-value">{best_2}</div><div class="card-week">📅 {best_2_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title">⚠️ 미납율 Worst</div><div class="card-value">{worst_2}</div><div class="card-week">📅 {worst_2_1}주차</div></div>', unsafe_allow_html=True)
     with col3:
-        # 미오출율 역시 '낮을수록' 좋은 지표
-        st.markdown(f"""
-        <div class="metric-card-best">
-            <div class="card-title">🚨 미오출율 Best</div>
-            <div class="card-value">{best_3}</div>
-            <div class="card-week">📅 {best_3_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class="metric-card-worst">
-            <div class="card-title">🚨 미오출율 Worst</div>
-            <div class="card-value">{worst_3}</div>
-            <div class="card-week">📅 {worst_3_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # --- 열 4: VOC 실적 ---
+        st.markdown(f'<div class="metric-card-best"><div class="card-title">🚨 미오출율 Best</div><div class="card-value">{best_3}</div><div class="card-week">📅 {best_3_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title">🚨 미오출율 Worst</div><div class="card-value">{worst_3}</div><div class="card-week">📅 {worst_3_1}주차</div></div>', unsafe_allow_html=True)
     with col4:
-        # VOC 건수는 적을수록 좋음
-        st.markdown(f"""
-        <div class="metric-card-best">
-            <div class="card-title">📞 VOC 실적 Best</div>
-            <div class="card-value">{best_4}건</div>
-            <div class="card-week">📅 {best_4_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class="metric-card-worst">
-            <div class="card-title">📞 VOC 실적 Worst</div>
-            <div class="card-value">{worst_4}건</div>
-            <div class="card-week">📅 {worst_4_1}주차</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title">📞 VOC Best</div><div class="card-value">{best_4}건</div><div class="card-week">📅 {best_4_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title">📞 VOC Worst</div><div class="card-value">{worst_4}건</div><div class="card-week">📅 {worst_4_1}주차</div></div>', unsafe_allow_html=True)
