@@ -1,9 +1,11 @@
 import json
 import folium
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from datetime import datetime
 from streamlit_folium import st_folium
 
 # =========================================================
@@ -36,7 +38,7 @@ if not df_c6.empty and all(
     df_c6["위도"] = pd.to_numeric(df_c6["위도"], errors="coerce")
     df_c6["경도"] = pd.to_numeric(df_c6["경도"], errors="coerce")
     df_c6 = df_c6.dropna(subset=["위도", "경도"])
-    store_list = df_c6["점포명"].tolist()
+    store_list = df_c6["점포명"].unique().tolist()
 else:
     store_list = []
 
@@ -54,21 +56,32 @@ def load_geojson():
 
 geojson_data = load_geojson()
 
-# =========================================================
-# 2. 주차 범위 자동 계산 (1주차 ~ 전주차/최대주차)
-# =========================================================
-# c1_df의 '주차' 컬럼을 기준으로 1주차부터 가장 최근(전주차) 주차까지 자동 지정
-start_w = 1
 
-if not c1_df.empty and "주차" in c1_df.columns:
-    latest_w = int(c1_df["주차"].max())
-else:
-    latest_w = 1
+# =========================================================
+# 헬퍼 함수: C1~C4 주차 컬럼 정확한 명칭 찾기
+# =========================================================
+def get_week_col_name(df, week):
+    if df.empty:
+        return None
+    possible_names = [f"{week}주차", f"W{week:02d}", f"W{week}", week, str(week)]
+    for col in df.columns:
+        if str(col).strip() in [str(p).strip() for p in possible_names]:
+            return col
+    return None
+
+
+# =========================================================
+# 2. 주차 범위 자동 계산 (오늘 날짜 기준 ISO 주차 - 1주차)
+# =========================================================
+start_w = 1
+current_iso_week = datetime.now().isocalendar()[1]
+latest_w = max(1, current_iso_week - 1)  # 오늘 기준 (ISO 주차 - 1주차)
 
 selected_weeks = list(range(start_w, latest_w + 1))
 
+
 # =========================================================
-# 3. 사이드바 UI (점포 선택만 제공)
+# 3. 사이드바 UI
 # =========================================================
 st.sidebar.header("🏢 점포 검색")
 
@@ -79,96 +92,122 @@ selected_store_name = st.sidebar.selectbox(
     help="선택 시 해당 점포 위치 및 KPI 데이터가 표시됩니다.",
 )
 
-# 현재 집계 범위 안내 표시
-st.sidebar.info(f"📅 **현재 분석 범위:** 1주차 ~ {latest_w}주차 (누적)")
+st.sidebar.info(f"📅 **현재 분석 범위:** 1주차 ~ {latest_w}주차 (전주차 누적)")
+
 
 # =========================================================
-# 4. KPI 계산 함수 (1주차 ~ 전주차 자동 계산)
+# 4. KPI 및 Top 5 계산 함수
 # =========================================================
-
-
 def calculate_kpi(c1, c2, c3, c4, store_name=None):
-    # 점포 필터링
-    if store_name and store_name != "선택 안함":
-        c1_sub = c1[c1["점포명"] == store_name] if "점포명" in c1 else c1
-        c2_sub = c2[c2["점포명"] == store_name] if "점포명" in c2 else c2
-        c3_sub = c3[c3["점포명"] == store_name] if "점포명" in c3 else c3
-        c4_sub = c4[c4["점포명"] == store_name] if "점포명" in c4 else c4
-    else:
-        c1_sub, c2_sub, c3_sub, c4_sub = c1, c2, c3, c4
+    def get_single_store_row(df):
+        if store_name and store_name != "선택 안함" and not df.empty:
+            for col in ["점포명", "점포"]:
+                if col in df.columns:
+                    filtered = df[df[col] == store_name]
+                    if not filtered.empty:
+                        return filtered.iloc[[0]]
+        return df
 
-    # 1주차 ~ 전주차(latest_w) 범위 필터링
-    c1_range = c1_sub[
-        (c1_sub["주차"] >= start_w) & (c1_sub["주차"] <= latest_w)
-    ]
-    c2_range = c2_sub[
-        (c2_sub["주차"] >= start_w) & (c2_sub["주차"] <= latest_w)
-    ]
-    c3_range = c3_sub[
-        (c3_sub["주차"] >= start_w) & (c3_sub["주차"] <= latest_w)
-    ]
-    c4_range = c4_sub[
-        (c4_sub["주차"] >= start_w) & (c4_sub["주차"] <= latest_w)
-    ]
+    c1_sub = get_single_store_row(c1)
+    c2_sub = get_single_store_row(c2)
+    c3_sub = get_single_store_row(c3)
+    c4_sub = get_single_store_row(c4)
 
-    # 1. 정시배송율 (%)
-    c1_agg = c1_range.groupby("주차")[["정시배송", "총배송"]].sum()
-    on_time = (
-        ((c1_agg["정시배송"] / c1_agg["총배송"]) * 100)
-        .fillna(0)
-        .reindex(selected_weeks, fill_value=0)
-    )
+    on_time, non_pay, non_ship, voc = [], [], [], []
 
-    # 2. 미납율 (%)
-    c2_agg = c2_range.groupby("주차")[["발주금액", "출하금액"]].sum()
-    non_pay = (
-        (
-            ((c2_agg["발주금액"] - c2_agg["출하금액"]) / c2_agg["발주금액"])
-            * 100
-        )
-        .fillna(0)
-        .reindex(selected_weeks, fill_value=0)
-    )
+    for w in selected_weeks:
+        # 1. 정시배송율
+        col1 = get_week_col_name(c1_sub, w)
+        if col1 and col1 in c1_sub.columns:
+            s = pd.to_numeric(c1_sub[col1], errors="coerce")
+            on_time.append(s.mean() if not s.dropna().empty else np.nan)
+        else:
+            on_time.append(np.nan)
 
-    # 3. 미오출율 (%)
-    c3_agg = c3_range.groupby("주차")[
-        ["출하금액", "점포확정금액"]
-    ].sum()
-    non_ship = (
-        (
-            (
-                (c3_agg["출하금액"] - c3_agg["점포확정금액"])
-                / c3_agg["출하금액"]
-            )
-            * 100
-        )
-        .fillna(0)
-        .reindex(selected_weeks, fill_value=0)
-    )
+        # 2. 미납율
+        col2 = get_week_col_name(c2_sub, w)
+        if col2 and col2 in c2_sub.columns:
+            s = pd.to_numeric(c2_sub[col2], errors="coerce")
+            non_pay.append(s.mean() if not s.dropna().empty else np.nan)
+        else:
+            non_pay.append(np.nan)
 
-    # 4. VOC 실적 (건)
-    voc = (
-        c4_range.groupby("주차")["VOC_건수"]
-        .sum()
-        .reindex(selected_weeks, fill_value=0)
-    )
+        # 3. 미오출율
+        col3 = get_week_col_name(c3_sub, w)
+        if col3 and col3 in c3_sub.columns:
+            s = pd.to_numeric(c3_sub[col3], errors="coerce")
+            non_ship.append(s.mean() if not s.dropna().empty else np.nan)
+        else:
+            non_ship.append(np.nan)
+
+        # 4. VOC 실적
+        col4 = get_week_col_name(c4_sub, w)
+        if col4 and col4 in c4_sub.columns:
+            s = pd.to_numeric(c4_sub[col4], errors="coerce")
+            voc.append(s.sum() if not s.dropna().empty else np.nan)
+        else:
+            voc.append(np.nan)
 
     return pd.DataFrame(
         {
             "주차": selected_weeks,
-            "정시배송율": on_time.values,
-            "미납율": non_pay.values,
-            "미오출율": non_ship.values,
-            "VOC실적": voc.values,
+            "정시배송율": on_time,
+            "미납율": non_pay,
+            "미오출율": non_ship,
+            "VOC실적": voc,
         }
     )
 
 
+# 🌟 VOC 인입 Top 5 점포 계산 함수
+def get_top_5_voc_stores(c4_df, weeks):
+    if c4_df.empty:
+        return pd.DataFrame(columns=["순위", "점포명", "총 VOC 건수"])
+
+    store_col = next(
+        (col for col in ["점포명", "점포"] if col in c4_df.columns), None
+    )
+    if not store_col:
+        return pd.DataFrame(columns=["순위", "점포명", "총 VOC 건수"])
+
+    # 분석 주차에 해당하는 컬럼 찾기
+    week_cols = [
+        get_week_col_name(c4_df, w)
+        for w in weeks
+        if get_week_col_name(c4_df, w)
+    ]
+
+    temp_df = c4_df.copy()
+    # 숫자형 변환
+    for col in week_cols:
+        temp_df[col] = pd.to_numeric(temp_df[col], errors="coerce").fillna(0)
+
+    # 선택된 주차들의 총합 계산
+    temp_df["총_VOC"] = temp_df[week_cols].sum(axis=1)
+
+    # 점포별 합산 (혹시 모를 중복 행 고려)
+    grouped = (
+        temp_df.groupby(store_col)["총_VOC"]
+        .sum()
+        .reset_index()
+        .sort_values(by="총_VOC", ascending=False)
+    )
+
+    top_5 = grouped.head(5).reset_index(drop=True)
+    top_5.index = top_5.index + 1
+    top_5 = top_5.reset_index().rename(
+        columns={"index": "순위", store_col: "점포명", "총_VOC": "총 VOC 건수"}
+    )
+    top_5["총 VOC 건수"] = top_5["총 VOC 건수"].astype(int)
+
+    return top_5
+
+
 # 데이터 계산 수행
-df_all_kpi = calculate_kpi(c1_df, c2_df, c3_df, c4_df)  # 전체 점포
-df_store_kpi = calculate_kpi(
-    c1_df, c2_df, c3_df, c4_df, selected_store_name
-)  # 선택 점포
+df_all_kpi = calculate_kpi(c1_df, c2_df, c3_df, c4_df)
+df_store_kpi = calculate_kpi(c1_df, c2_df, c3_df, c4_df, selected_store_name)
+df_top5_voc = get_top_5_voc_stores(c4_df, selected_weeks)
+
 
 # =========================================================
 # 5. 메인 화면 레이아웃 (좌: 지도 50%, 우: KPI 50%)
@@ -188,11 +227,10 @@ with map_col:
         if not selected_df.empty:
             target_row = selected_df.iloc[0]
 
-    # 👇 [수정 위치] 점포를 선택해도 zoom_level을 7로 고정하여 지도 형태 변경 방지!
     if target_row is not None:
         center_lat = target_row["위도"]
         center_lng = target_row["경도"]
-        zoom_level = 7  # 지도 비율/형태 유지 (줌 확대 안 함)
+        zoom_level = 7
     else:
         center_lat = 36.2
         center_lng = 127.8
@@ -201,7 +239,7 @@ with map_col:
     m = folium.Map(
         location=[center_lat, center_lng],
         zoom_start=zoom_level,
-        tiles="CartoDB positron",  # 지도 타일 스타일 유지
+        tiles="CartoDB positron",
     )
 
     if geojson_data:
@@ -224,10 +262,9 @@ with map_col:
         ).add_to(m)
 
     if target_row is not None:
-        # 확대하지 않고도 멀리서 점포 위치가 잘 보이도록 마커 반지름(radius) 증대
         folium.CircleMarker(
             location=[target_row["위도"], target_row["경도"]],
-            radius=18,  # 강조를 위해 살짝 크게 변경
+            radius=18,
             color="#dc2626",
             fill=True,
             fill_color="#f87171",
@@ -245,137 +282,186 @@ with map_col:
 
 
 # ---------------------------------------------------------
-# 📊 [우측 컬럼] KPI 실적 비교 (상단: 전체 점포 / 하단: 선택 점포)
+# 📊 [우측 컬럼] KPI 실적 및 Top 5
 # ---------------------------------------------------------
 with right_col:
+    week_labels = [str(w) for w in df_all_kpi["주차"]]
+
     # =====================================================
-    # ① [우측 상단] 전체 점포 누적 평균
+    # ① [우측 상단] 전체 점포 누적 평균 & VOC Top 5
     # =====================================================
     st.markdown(f"### 🌐 전체 점포 누적 평균 (1 ~ {latest_w}주차)")
 
-    # 전체 요약 카드 (높이 컴팩트하게)
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("정시배송율", f"{df_all_kpi['정시배송율'].mean():.1f}%")
-    col2.metric("미납율", f"{df_all_kpi['미납율'].mean():.1f}%")
-    col3.metric("미오출율", f"{df_all_kpi['미오출율'].mean():.1f}%")
-    col4.metric("VOC 실적(합계)", f"{df_all_kpi['VOC실적'].sum():,.0f}건")
+    avg_otd = df_all_kpi["정시배송율"].mean(skipna=True)
+    avg_np = df_all_kpi["미납율"].mean(skipna=True)
+    avg_ns = df_all_kpi["미오출율"].mean(skipna=True)
+    sum_voc = df_all_kpi["VOC실적"].sum(skipna=True)
 
-    # 전체 점포 주차별 추이 차트
-    fig_all = px.line(
-        df_all_kpi,
-        x="주차",
-        y=["정시배송율", "미납율", "미오출율"],
-        markers=True,
-        title="전체 점포 주차별 물류 지표 추이 (%)",
+    col1.metric("정시배송율", f"{avg_otd:.1f}%" if pd.notna(avg_otd) else "-")
+    col2.metric("미납율", f"{avg_np:.1f}%" if pd.notna(avg_np) else "-")
+    col3.metric("미오출율", f"{avg_ns:.1f}%" if pd.notna(avg_ns) else "-")
+    col4.metric(
+        "VOC 실적(합계)", f"{int(sum_voc):,}건" if pd.notna(sum_voc) else "-"
     )
-    fig_all.update_layout(
-        height=200,  # 지도 높이에 맞춰 높이 조절
-        margin=dict(l=10, r=10, t=30, b=10),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-        ),
-    )
-    st.plotly_chart(fig_all, use_container_width=True)
 
-    st.divider()  # 깔끔한 구분선
+# 🌟 VOC Top 5 표 표출 (가운데 정렬 적용)
+    with st.expander(
+        f"🚨 **[누적 Top 5] VOC 최다 발생 점포 (1 ~ {latest_w}주차)**",
+        expanded=True,
+    ):
+        if not df_top5_voc.empty:
+            st.dataframe(
+                df_top5_voc,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "순위": st.column_config.NumberColumn(
+                        "순위", format="%d위", alignment="center"
+                    ),
+                    "점포명": st.column_config.TextColumn(
+                        "점포명", alignment="center"
+                    ),
+                    "총 VOC 건수": st.column_config.NumberColumn(
+                        "총 VOC 건수", format="%d 건", alignment="center"
+                    ),
+                },
+            )
+        else:
+            st.write("표시할 VOC 데이터가 없습니다.")
+
+
+    st.divider()
 
     # =====================================================
-    # ② [우측 하단] 선택 점포 실적 추이 (right_col 내부 배치!)
+    # ② [우측 하단] 선택 점포 실적 추이
     # =====================================================
     if selected_store_name != "선택 안함":
-        st.markdown(f"### 🎯 [{selected_store_name}] 누적 평균(1 ~ {latest_w}주차)")
+        st.markdown(
+            f"### 🎯 [{selected_store_name}] 누적 평균(1 ~ {latest_w}주차)"
+        )
 
-        # 선택 점포 요약 카드
         col1_s, col2_s, col3_s, col4_s = st.columns(4)
 
+        s_avg_otd = df_store_kpi["정시배송율"].mean(skipna=True)
+        s_avg_np = df_store_kpi["미납율"].mean(skipna=True)
+        s_avg_ns = df_store_kpi["미오출율"].mean(skipna=True)
+        s_sum_voc = df_store_kpi["VOC실적"].sum(skipna=True)
+
         diff_on_time = (
-            df_store_kpi["정시배송율"].mean() - df_all_kpi["정시배송율"].mean()
+            s_avg_otd - avg_otd
+            if (pd.notna(s_avg_otd) and pd.notna(avg_otd))
+            else None
         )
         diff_non_pay = (
-            df_store_kpi["미납율"].mean() - df_all_kpi["미납율"].mean()
+            s_avg_np - avg_np
+            if (pd.notna(s_avg_np) and pd.notna(avg_np))
+            else None
         )
         diff_non_ship = (
-            df_store_kpi["미오출율"].mean() - df_all_kpi["미오출율"].mean()
+            s_avg_ns - avg_ns
+            if (pd.notna(s_avg_ns) and pd.notna(avg_ns))
+            else None
         )
 
         col1_s.metric(
             "정시배송율",
-            f"{df_store_kpi['정시배송율'].mean():.1f}%",
-            delta=f"{diff_on_time:+.1f}%p",
+            f"{s_avg_otd:.1f}%" if pd.notna(s_avg_otd) else "-",
+            delta=f"{diff_on_time:+.1f}%p"
+            if diff_on_time is not None
+            else None,
         )
         col2_s.metric(
             "미납율",
-            f"{df_store_kpi['미납율'].mean():.1f}%",
-            delta=f"{diff_non_pay:+.1f}%p",
+            f"{s_avg_np:.1f}%" if pd.notna(s_avg_np) else "-",
+            delta=f"{diff_non_pay:+.1f}%p"
+            if diff_non_pay is not None
+            else None,
             delta_color="inverse",
         )
         col3_s.metric(
             "미오출율",
-            f"{df_store_kpi['미오출율'].mean():.1f}%",
-            delta=f"{diff_non_ship:+.1f}%p",
+            f"{s_avg_ns:.1f}%" if pd.notna(s_avg_ns) else "-",
+            delta=f"{diff_non_ship:+.1f}%p"
+            if diff_non_ship is not None
+            else None,
             delta_color="inverse",
         )
         col4_s.metric(
-            "VOC 실적(합계)", f"{df_store_kpi['VOC실적'].sum():,.0f}건"
+            "VOC 실적(합계)",
+            f"{int(s_sum_voc):,}건" if pd.notna(s_sum_voc) else "0건",
         )
 
-        # 탭을 이용해 비율 지표 / VOC 지표 깔끔하게 정리
         tab1, tab2 = st.tabs(["📈 비율 지표 추이 (%)", "🚨 VOC 발생 추이 (건)"])
 
         with tab1:
             fig_store_rates = go.Figure()
             fig_store_rates.add_trace(
                 go.Scatter(
-                    x=df_store_kpi["주차"],
+                    x=week_labels,
                     y=df_store_kpi["정시배송율"],
                     mode="lines+markers",
                     name="정시배송율",
                     line=dict(color="#22c55e", width=2),
+                    hovertemplate="정시배송율: <b>%{y:.1f}%</b><extra></extra>",
                 )
             )
             fig_store_rates.add_trace(
                 go.Scatter(
-                    x=df_store_kpi["주차"],
+                    x=week_labels,
                     y=df_store_kpi["미납율"],
                     mode="lines+markers",
                     name="미납율",
                     line=dict(color="#f97316", width=2),
+                    hovertemplate="미납율: <b>%{y:.1f}%</b><extra></extra>",
                 )
             )
             fig_store_rates.add_trace(
                 go.Scatter(
-                    x=df_store_kpi["주차"],
+                    x=week_labels,
                     y=df_store_kpi["미오출율"],
                     mode="lines+markers",
                     name="미오출율",
                     line=dict(color="#ef4444", width=2),
+                    hovertemplate="미오출율: <b>%{y:.1f}%</b><extra></extra>",
                 )
             )
 
             fig_store_rates.update_layout(
-                height=200,  # 지도 높이에 맞춤
+                height=180,
                 margin=dict(l=10, r=10, t=25, b=10),
+                hovermode="x unified",
                 legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
                 ),
                 yaxis=dict(range=[0, 105]),
+                xaxis=dict(type="category", tickangle=0, dtick=1),
             )
             st.plotly_chart(fig_store_rates, use_container_width=True)
 
         with tab2:
-            fig_store_voc = px.bar(
-                df_store_kpi,
-                x="주차",
-                y="VOC실적",
-                text_auto=True,
-                color_discrete_sequence=["#8b5cf6"],
+            fig_store_voc = go.Figure()
+            text_voc = [
+                f"{int(v)}건" if (pd.notna(v) and v > 0) else ""
+                for v in df_store_kpi["VOC실적"]
+            ]
+
+            fig_store_voc.add_trace(
+                go.Bar(
+                    x=week_labels,
+                    y=df_store_kpi["VOC실적"],
+                    text=text_voc,
+                    textposition="auto",
+                    marker_color="#8b5cf6",
+                    hovertemplate="VOC 합계: <b>%{y:,.0f}건</b><extra></extra>",
+                )
             )
+
             fig_store_voc.update_layout(
-                height=200, margin=dict(l=10, r=10, t=25, b=10)
+                height=180,
+                margin=dict(l=10, r=10, t=25, b=10),
+                hovermode="x unified",
+                xaxis=dict(type="category", tickangle=0, dtick=1),
             )
             st.plotly_chart(fig_store_voc, use_container_width=True)
 
