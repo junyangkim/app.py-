@@ -86,7 +86,7 @@ if creds is None:
 
 client = gspread.authorize(creds)
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def load_all_sheets():
     try:
         # 고유 시트 ID 기반 접근 시도
