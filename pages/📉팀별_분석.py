@@ -20,6 +20,34 @@ else:
     st.error("⚠️ 데이터가 로드되지 않았습니다. 메인 페이지에서 데이터를 먼저 불러오세요.")
     st.stop()
 
+# =========================================================
+# 모바일 반응형 CSS 코드 ***** 문제시 여기 삭제 
+# =========================================================
+st.markdown("""
+<style>
+       @media (max-width: 768px) {
+           .main .block-container {
+               padding-left: 0.8rem !important;
+               padding-right: 0.8rem !important;
+               padding-top: 1rem !important;
+           }
+           [data-testid="column"] {
+               width: 100% !important;
+               flex: 1 1 100% !important;
+               min-width: 100% !important;
+               margin-bottom: 0.5rem;
+           }
+           h1 { font-size: 1.5rem !important; }
+           h2 { font-size: 1.25rem !important; }
+           h3 { font-size: 1.1rem !important; }
+           [data-testid="stMetric"] {
+               padding: 6px !important;
+           }
+       }
+</style>
+""", unsafe_allow_html=True)
+
+
 
 # =========================================================
 # 헬퍼 함수: 주차 컬럼명 자동 매핑 및 유효 데이터 계산
