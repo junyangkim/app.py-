@@ -14,6 +14,34 @@ from streamlit_folium import st_folium
 st.set_page_config(layout="wide", page_title="전국 점포 및 KPI 종합 분석")
 
 # =========================================================
+# 모바일 반응형 CSS 코드 ***** 문제시 여기 삭제 
+# =========================================================
+st.markdown("""
+<style>
+       @media (max-width: 768px) {
+           .main .block-container {
+               padding-left: 0.8rem !important;
+               padding-right: 0.8rem !important;
+               padding-top: 1rem !important;
+           }
+           [data-testid="column"] {
+               width: 100% !important;
+               flex: 1 1 100% !important;
+               min-width: 100% !important;
+               margin-bottom: 0.5rem;
+           }
+           h1 { font-size: 1.5rem !important; }
+           h2 { font-size: 1.25rem !important; }
+           h3 { font-size: 1.1rem !important; }
+           [data-testid="stMetric"] {
+               padding: 6px !important;
+           }
+       }
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================================================
 # 1. 데이터 로드 (세션 상태 확인)
 # =========================================================
 if "all_data" in st.session_state:
