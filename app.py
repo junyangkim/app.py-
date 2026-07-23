@@ -115,22 +115,34 @@ def load_all_sheets():
 # --- 이하 대시보드 UI/차트 코드 (기존과 동일) ---
 iso_year, iso_week, iso_weekday = datetime.now().isocalendar()
 
+# N-1 주차 계산
+default_week = iso_week - 1 if iso_week > 1 else 52
+
 with st.sidebar:
     st.markdown("## ⚙️ 분석 필터 셋팅")
     st.caption("대시보드에 표시될 데이터의 조회 조건을 설정하세요.")
     st.markdown("---")
+
     with st.container(border=True):
-        st.markdown("###  기간 설정")
+        st.markdown("### 기간 설정")
+
         selected_week = st.selectbox(
             "조회 주차 선택",
             options=list(range(1, 53)),
-            index=iso_week - 1,
+            index=default_week - 1,  # ← N-1 주차를 기본 선택
             format_func=lambda x: f" 제 {x}주차 (W{x:02d})"
         )
-        if selected_week == iso_week:
-            st.info(f"✨ **금일 기준 주차(W{iso_week:02d})** 데이터 조회 모드입니다.")
+
+        if selected_week == default_week:
+            st.info(
+                f"✨ **기본 조회 주차(W{default_week:02d})** 데이터 조회 모드입니다."
+            )
         else:
-            st.warning(f"🔍 **과거 주차(W{selected_week:02d})** 데이터 조회 모드입니다. (현재: W{iso_week:02d}주차)")
+            st.warning(
+                f"🔍 **선택 주차(W{selected_week:02d})** 데이터 조회 모드입니다. "
+                f"(기본: W{default_week:02d})"
+            )
+
     st.markdown("---")
     st.caption(f"📌 **마지막 동기화:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     st.caption("🔒 본 자료는 사내 공유용 보안 문서입니다.")
@@ -139,7 +151,7 @@ st.title("📦 물류 핵심 지표(KPI) 통합 대시보드")
 st.caption("🚀 4대 지표 종합 모니터링 시스템")
 st.markdown("")
 
-CHART_HEIGHT = 280  
+CHART_HEIGHT = 280
 
 # =========================================================
 # 구글 시트 헤더 자동 대응 함수 (가로형 컬럼 찾기)
