@@ -483,10 +483,10 @@ with bottom_col2:
     sum_voc_total = s_voc.sum() if not s_voc.empty else 0
 
     card_row1_col1, card_row1_col2, card_row1_col3, card_row1_col4 = st.columns(4)
-    with card_row1_col1: st.metric("🚚 정시배송(전체기간평균)", f"{avg_ontime:.1f}%")
-    with card_row1_col2: st.metric("⚠️ 미납율(전체기간평균)", f"{avg_non_delivery:.1f}%")
-    with card_row1_col3: st.metric("🚨 미오출율(전체기간평균)", f"{avg_mis_delivery:.1f}%")
-    with card_row1_col4: st.metric("📞 VOC(전체기간합계)", f"{int(sum_voc_total):,}건")
+    with card_row1_col1: st.metric("정시배송(전체평균)", f"{avg_ontime:.1f}%")
+    with card_row1_col2: st.metric("미납율(전체평균)", f"{avg_non_delivery:.1f}%")
+    with card_row1_col3: st.metric("미오출율(전체평균)", f"{avg_mis_delivery:.1f}%")
+    with card_row1_col4: st.metric("VOC(전체합계)", f"{int(sum_voc_total):,}건")
 
     # 🚚 정시배송율 (높을수록 Best - idxmax/idxmin은 NaN을 알아서 제외함)
     if not s_otd.empty:
@@ -518,14 +518,14 @@ with bottom_col2:
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(f'<div class="metric-card-best"><div class="card-title">🚚 정시배송 Best</div><div class="card-value">{best_1}</div><div class="card-week">📅 {best_1_1}주차</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card-worst"><div class="card-title">🚚 정시배송 Worst</div><div class="card-value">{worst_1}</div><div class="card-week">📅 {worst_1_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title"> 정시배송 Best</div><div class="card-value">{best_1}</div><div class="card-week">📅 {best_1_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 정시배송 Worst</div><div class="card-value">{worst_1}</div><div class="card-week">📅 {worst_1_1}주차</div></div>', unsafe_allow_html=True)
     with col2:
-        st.markdown(f'<div class="metric-card-best"><div class="card-title">⚠️ 미납율 Best</div><div class="card-value">{best_2}</div><div class="card-week">📅 {best_2_1}주차</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card-worst"><div class="card-title">⚠️ 미납율 Worst</div><div class="card-value">{worst_2}</div><div class="card-week">📅 {worst_2_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title"> 미납율 Best</div><div class="card-value">{best_2}</div><div class="card-week">📅 {best_2_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 미납율 Worst</div><div class="card-value">{worst_2}</div><div class="card-week">📅 {worst_2_1}주차</div></div>', unsafe_allow_html=True)
     with col3:
-        st.markdown(f'<div class="metric-card-best"><div class="card-title">🚨 미오출율 Best</div><div class="card-value">{best_3}</div><div class="card-week">📅 {best_3_1}주차</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card-worst"><div class="card-title">🚨 미오출율 Worst</div><div class="card-value">{worst_3}</div><div class="card-week">📅 {worst_3_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title"> 미오출율 Best</div><div class="card-value">{best_3}</div><div class="card-week">📅 {best_3_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 미오출율 Worst</div><div class="card-value">{worst_3}</div><div class="card-week">📅 {worst_3_1}주차</div></div>', unsafe_allow_html=True)
     with col4:
-        st.markdown(f'<div class="metric-card-best"><div class="card-title">📞 VOC Best</div><div class="card-value">{best_4}건</div><div class="card-week">📅 {best_4_1}주차</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card-worst"><div class="card-title">📞 VOC Worst</div><div class="card-value">{worst_4}건</div><div class="card-week">📅 {worst_4_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title"> VOC Best</div><div class="card-value">{best_4}건</div><div class="card-week">📅 {best_4_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> VOC Worst</div><div class="card-value">{worst_4}건</div><div class="card-week">📅 {worst_4_1}주차</div></div>', unsafe_allow_html=True)
