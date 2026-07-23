@@ -24,6 +24,34 @@ scope = ["https://spreadsheets.google.com/feeds",
 
 creds = None
 
+# =========================================================
+# 모바일 반응형 CSS 코드 ***** 문제시 여기 삭제 
+# =========================================================
+st.markdown("""
+<style>
+       @media (max-width: 768px) {
+           .main .block-container {
+               padding-left: 0.8rem !important;
+               padding-right: 0.8rem !important;
+               padding-top: 1rem !important;
+           }
+           [data-testid="column"] {
+               width: 100% !important;
+               flex: 1 1 100% !important;
+               min-width: 100% !important;
+               margin-bottom: 0.5rem;
+           }
+           h1 { font-size: 1.5rem !important; }
+           h2 { font-size: 1.25rem !important; }
+           h3 { font-size: 1.1rem !important; }
+           [data-testid="stMetric"] {
+               padding: 6px !important;
+           }
+       }
+</style>
+""", unsafe_allow_html=True)
+
+
 # [🔐 완벽 매칭 호환 로직] 1단계: Secrets에 직통으로 type이 있는지 확인
 try:
     if "type" in st.secrets:
