@@ -86,7 +86,7 @@ if creds is None:
 
 client = gspread.authorize(creds)
 
-@st.cache_data(ttl=6)
+@st.cache_data(ttl=600)
 def load_all_sheets():
     try:
         spreadsheet = client.open_by_key("14Rn-yawMAO_L5BNiEsg6EZwgQ3nggxS9raGqLDIU2o0")
