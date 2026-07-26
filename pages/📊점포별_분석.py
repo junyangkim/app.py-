@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 import folium
+from folium.plugins import BeautifyIcon
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -55,14 +56,15 @@ if "all_data" in st.session_state:
   c4_df = db.get("c4", pd.DataFrame())
   c5_df = db.get("c5", pd.DataFrame())
   c6_df = db.get("c6", pd.DataFrame())
-  c7_df = db.get("c7", pd.DataFrame())  # C7 추가
+  c7_df = db.get("c7", pd.DataFrame())
+  c8_df = db.get("c8", pd.DataFrame())  # C8: 물류센터 마스터 데이터
 else:
   st.error(
       "⚠️ 데이터가 로드되지 않았습니다. 메인 페이지에서 데이터를 먼저 불러오세요."
   )
   st.stop()
 
-# C6 데이터 전처리
+# C6 (점포 데이터) 전처리
 df_c6 = c6_df.copy()
 if not df_c6.empty and all(
     col in df_c6.columns for col in ["점포명", "위도", "경도"]
@@ -74,20 +76,30 @@ if not df_c6.empty and all(
 else:
   store_list = []
 
+# C8 (물류센터 마스터) 전처리
+df_c8 = c8_df.copy()
+dc_dict = {}
+if not df_c8.empty:
+  center_col = next(
+      (c for c in ["센터명", "물류센터", "DC명"] if c in df_c8.columns), None
+  )
+  if center_col and "위도" in df_c8.columns and "경도" in df_c8.columns:
+    df_c8["위도"] = pd.to_numeric(df_c8["위도"], errors="coerce")
+    df_c8["경도"] = pd.to_numeric(df_c8["경도"], errors="coerce")
+    df_c8 = df_c8.dropna(subset=["위도", "경도"])
 
-# GeoJSON 불러오기
-@st.cache_data
-def load_geojson():
-  try:
-    with open("korea_sigungoo.geo.json", encoding="utf-8") as f:
-      return json.load(f)
-  except Exception as e:
-    st.error(f"❌ GeoJSON 파일 로드 오류: {e}")
-    return None
+    for _, row in df_c8.iterrows():
+      name = str(row[center_col]).strip()
+      lat = float(row["위도"])
+      lng = float(row["경도"])
 
+      # 💡 화성과 평택 시각적 겹침 방지 (임의 오프셋 조정)
+      if "화성" in name:
+        lng -= 0.035  # 서쪽(왼쪽)으로 살짝 이동
+      elif "평택" in name:
+        lng += 0.025  # 동쪽(오른쪽)으로 살짝 이동
 
-geojson_data = load_geojson()
-
+      dc_dict[name] = {"lat": lat, "lng": lng}
 
 # =========================================================
 # 헬퍼 함수: C1~C7 주차 컬럼 정확한 명칭 찾기
@@ -107,7 +119,7 @@ def get_week_col_name(df, week):
 # =========================================================
 start_w = 1
 current_iso_week = datetime.now().isocalendar()[1]
-latest_w = max(1, current_iso_week - 1)  # 오늘 기준 (ISO 주차 - 1주차)
+latest_w = max(1, current_iso_week - 1)
 
 selected_weeks = list(range(start_w, latest_w + 1))
 
@@ -121,7 +133,7 @@ selected_store_name = st.sidebar.selectbox(
     "점포 선택",
     options=["선택 안함"] + store_list,
     index=0,
-    help="선택 시 해당 점포 위치 및 KPI 데이터가 표시됩니다.",
+    help="선택 시 해당 점포 위치 및 담당 물류센터 공급망이 표시됩니다.",
 )
 
 st.sidebar.info(f"📅 **현재 분석 범위:** 1주차 ~ {latest_w}주차 (전주차 누적)")
@@ -188,25 +200,21 @@ def calculate_kpi(c1, c2, c3, c4, c5, c7, store_name=None):
         else np.nan
     )
 
-    # 1. 정시배송율: (C1 합계 / C2 합계) * 100
     if pd.notna(sum_c1) and pd.notna(sum_c2) and sum_c2 > 0:
       on_time.append((sum_c1 / sum_c2) * 100)
     else:
       on_time.append(np.nan)
 
-    # 2. 미납율: (C5 합계 - C3 합계) / C5 합계 * 100
     if pd.notna(sum_c5) and pd.notna(sum_c3) and sum_c5 > 0:
       non_pay.append(((sum_c5 - sum_c3) / sum_c5) * 100)
     else:
       non_pay.append(np.nan)
 
-    # 3. 미오출율: (C3 합계 - C7 합계) / C3 합계 * 100
     if pd.notna(sum_c3) and pd.notna(sum_c7) and sum_c3 > 0:
       non_ship.append(((sum_c3 - sum_c7) / sum_c3) * 100)
     else:
       non_ship.append(np.nan)
 
-    # 4. VOC 실적: C4 합계
     voc.append(sum_c4 if pd.notna(sum_c4) else np.nan)
 
   return pd.DataFrame({
@@ -218,7 +226,6 @@ def calculate_kpi(c1, c2, c3, c4, c5, c7, store_name=None):
   })
 
 
-# 🌟 VOC 인입 Top 5 점포 계산 함수
 def get_top_5_voc_stores(c4_df, weeks):
   if c4_df.empty:
     return pd.DataFrame(columns=["순위", "점포명", "총 VOC 건수"])
@@ -258,7 +265,6 @@ def get_top_5_voc_stores(c4_df, weeks):
   return top_5
 
 
-# 🌟 미오출율 Top 5 점포 계산 함수 (누적 C3, C7 반영)
 def get_top_5_non_ship_stores(c3_df, c7_df, weeks):
   if c3_df.empty or c7_df.empty:
     return pd.DataFrame(columns=["순위", "점포명", "미오출율"])
@@ -299,11 +305,7 @@ def get_top_5_non_ship_stores(c3_df, c7_df, weeks):
   sum_c7 = temp_c7.groupby(store_col_c7)["총_C7"].sum().reset_index()
 
   merged = pd.merge(
-      sum_c3,
-      sum_c7,
-      left_on=store_col_c3,
-      right_on=store_col_c7,
-      how="inner",
+      sum_c3, sum_c7, left_on=store_col_c3, right_on=store_col_c7, how="inner"
   )
 
   merged = merged[merged["총_C3"] > 0].copy()
@@ -324,7 +326,6 @@ def get_top_5_non_ship_stores(c3_df, c7_df, weeks):
   return top_5[["순위", "점포명", "미오출율"]]
 
 
-# 데이터 계산 수행 (C1~C7 활용)
 df_all_kpi = calculate_kpi(c1_df, c2_df, c3_df, c4_df, c5_df, c7_df)
 df_store_kpi = calculate_kpi(
     c1_df, c2_df, c3_df, c4_df, c5_df, c7_df, selected_store_name
@@ -340,11 +341,62 @@ map_col, right_col = st.columns([50, 50])
 
 
 # ---------------------------------------------------------
-# 🗺️ [좌측 컬럼] Folium 지도
+# 🗺️ [좌측 컬럼] Folium 지도 (라벨 쏠림 방지 & 완벽 위치 고정)
 # ---------------------------------------------------------
 with map_col:
-  st.markdown("### 🗺️ Store Location")
+  st.markdown("### 🗺️ 물류센터 & 점포 공급망 지점 지도")
 
+  # 지도의 기본 중심점
+  m = folium.Map(
+      location=[36.2, 127.8], zoom_start=7, tiles="CartoDB positron"
+  )
+
+  # -------------------------------------------------------
+  # 1. 물류센터 고정 말풍선 (DivIcon 표준 렌더링 - 쏠림 현상 해결)
+  # -------------------------------------------------------
+  for dc_name, coords in dc_dict.items():
+    dc_lat, dc_lng = coords["lat"], coords["lng"]
+
+    # 🔵 작은 물류센터 위치 점
+    folium.CircleMarker(
+        location=[dc_lat, dc_lng],
+        radius=3,
+        color="#2563eb",
+        fill=True,
+        fill_color="#2563eb",
+        fill_opacity=1.0,
+    ).add_to(m)
+
+    # 🏷️ 물류센터 라벨 (위경도 좌표에 완벽 고정)
+    label_html = f"""
+        <div style="
+            font-size: 10px;
+            font-weight: bold;
+            color: #1e3a8a;
+            background-color: #ffffff;
+            border: 1.5px solid #3b82f6;
+            border-radius: 4px;
+            padding: 1px 5px;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.15);
+            display: inline-block;
+            line-height: 1.2;
+            width: max-content;
+        ">
+            🏭 {dc_name}
+        </div>
+        """
+
+    # icon_size=(0,0)과 icon_anchor 조합으로 쏠림 방지
+    folium.map.Marker(
+        location=[dc_lat, dc_lng],
+        icon=folium.DivIcon(
+            icon_size=(0, 0), icon_anchor=(-8, 10), html=label_html
+        ),
+    ).add_to(m)
+
+  # -------------------------------------------------------
+  # 2. 선택 점포 및 공급망 Line 연결
+  # -------------------------------------------------------
   target_row = None
   if selected_store_name != "선택 안함" and not df_c6.empty:
     selected_df = df_c6[df_c6["점포명"] == selected_store_name]
@@ -352,58 +404,97 @@ with map_col:
       target_row = selected_df.iloc[0]
 
   if target_row is not None:
-    center_lat = target_row["위도"]
-    center_lng = target_row["경도"]
-    zoom_level = 7
-  else:
-    center_lat = 36.2
-    center_lng = 127.8
-    zoom_level = 7
+    store_lat = float(target_row["위도"])
+    store_lng = float(target_row["경도"])
 
-  m = folium.Map(
-      location=[center_lat, center_lng],
-      zoom_start=zoom_level,
-      tiles="CartoDB positron",
-  )
-
-  if geojson_data:
-    folium.GeoJson(
-        geojson_data,
-        name="시군구 경계",
-        style_function=lambda feature: {
-            "fillColor": "#334155",
-            "color": "#1e293b",
-            "weight": 0.8,
-            "fillOpacity": 0.35,
-        },
-        highlight_function=lambda feature: {
-            "fillColor": "#38bdf8",
-            "fillOpacity": 0.6,
-        },
-        tooltip=folium.GeoJsonTooltip(
-            fields=["name"], aliases=["지역명:"], localize=True
-        ),
-    ).add_to(m)
-
-  if target_row is not None:
+# 🔴 선택 점포 마커: 커서를 올리면 점포명이 뜨도록 tooltip 추가!
     folium.CircleMarker(
-        location=[target_row["위도"], target_row["경도"]],
-        radius=18,
-        color="#dc2626",
+        location=[store_lat, store_lng],
+        radius=6,
+        color="#b91c1c",
         fill=True,
-        fill_color="#f87171",
-        fill_opacity=0.8,
-        tooltip=f"📍 {target_row['점포명']}",
+        fill_color="#ef4444",
+        fill_opacity=0.95,
+        tooltip=selected_store_name,  # 🎯 [핵심] 마우스 호버 시 선택한 점포명 표시!
+        popup=f"<b>📍 점포명:</b> {selected_store_name}",
     ).add_to(m)
 
-    folium.Marker(
-        location=[target_row["위도"], target_row["경도"]],
-        popup=target_row["점포명"],
-        icon=folium.Icon(color="red", icon="star", prefix="fa"),
-    ).add_to(m)
+    # D열(iloc[3]), E열(iloc[4]) 기반 공급센터 추출
+    dc1_raw = None
+    dc2_raw = None
+
+    for col in target_row.index:
+      col_str = str(col).strip()
+      if "공급1" in col_str or "1센터" in col_str:
+        dc1_raw = target_row[col]
+      elif "공급2" in col_str or "2센터" in col_str:
+        dc2_raw = target_row[col]
+
+    if dc1_raw is None and len(target_row) >= 4:
+      dc1_raw = target_row.iloc[3]  # D열
+    if dc2_raw is None and len(target_row) >= 5:
+      dc2_raw = target_row.iloc[4]  # E열
+
+    def clean_dc_name(val):
+      if pd.isna(val) or not str(val).strip():
+        return None
+      val_str = str(val).strip()
+      if val_str.lower() in ["nan", "none", "", "null", "-"]:
+        return None
+      return val_str
+
+    dc1_name = clean_dc_name(dc1_raw)
+    dc2_name = clean_dc_name(dc2_raw)
+
+    def find_matching_dc_coords(search_name):
+      if not search_name:
+        return None, None
+      if search_name in dc_dict:
+        return search_name, dc_dict[search_name]
+      for real_dc_name, coords in dc_dict.items():
+        if search_name in real_dc_name or real_dc_name in search_name:
+          return real_dc_name, coords
+      return None, None
+
+    bounds_coords = [[store_lat, store_lng]]
+
+    # ① 공급1센터 (D열) - 파란색 실선
+    matched_dc1, dc1_coords = find_matching_dc_coords(dc1_name)
+    if dc1_coords:
+      dc1_lat_lng = [dc1_coords["lat"], dc1_coords["lng"]]
+      bounds_coords.append(dc1_lat_lng)
+
+      folium.PolyLine(
+          locations=[dc1_lat_lng, [store_lat, store_lng]],
+          color="#2563eb",
+          weight=3.5,
+          opacity=0.85,
+          tooltip=f"공급1센터 [{matched_dc1}] ➔ {selected_store_name}",
+      ).add_to(m)
+
+    # ② 공급2센터 (E열) - 보라색 점선
+    matched_dc2, dc2_coords = find_matching_dc_coords(dc2_name)
+    if dc2_coords:
+      dc2_lat_lng = [dc2_coords["lat"], dc2_coords["lng"]]
+      bounds_coords.append(dc2_lat_lng)
+
+      folium.PolyLine(
+          locations=[dc2_lat_lng, [store_lat, store_lng]],
+          color="#9333ea",
+          weight=3,
+          opacity=0.8,
+          dash_array="6, 6",
+          tooltip=f"공급2센터 [{matched_dc2}] ➔ {selected_store_name}",
+      ).add_to(m)
+
+    # 시야 자동 조정
+    if len(bounds_coords) > 1:
+      m.fit_bounds(bounds_coords, padding=(50, 50))
+    else:
+      m.location = [store_lat, store_lng]
+      m.zoom_start = 11
 
   st_folium(m, width="100%", height=820, returned_objects=[])
-
 
 # ---------------------------------------------------------
 # 📊 [우측 컬럼] KPI 실적 및 Top 5
@@ -411,9 +502,7 @@ with map_col:
 with right_col:
   week_labels = [str(w) for w in df_all_kpi["주차"]]
 
-  # =====================================================
   # ① [우측 상단] 전체 점포 누적 평균 & Top 5 탭 선택형 UI
-  # =====================================================
   st.markdown(f"### 🌐 전체 점포 누적 평균 (1 ~ {latest_w}주차)")
 
   col1, col2, col3, col4 = st.columns(4)
@@ -429,7 +518,6 @@ with right_col:
       "VOC 실적(합계)", f"{int(sum_voc):,}건" if pd.notna(sum_voc) else "-"
   )
 
-  # 🌟 Top 5 선택형 탭 UI (VOC Top 5 / 미오출율 Top 5)
   with st.expander(
       f"🏆 **[누적 Top 5] 주요 관리 점포 현황 (1 ~ {latest_w}주차)**",
       expanded=True,
@@ -482,9 +570,7 @@ with right_col:
 
   st.divider()
 
-  # =====================================================
   # ② [우측 하단] 선택 점포 실적 추이
-  # =====================================================
   if selected_store_name != "선택 안함":
     st.markdown(
         f"### 🎯 [{selected_store_name}] 누적 평균(1 ~ {latest_w}주차)"
