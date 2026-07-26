@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import json
 import pandas as pd
@@ -86,7 +86,7 @@ if creds is None:
 
 client = gspread.authorize(creds)
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def load_all_sheets():
     try:
         spreadsheet = client.open_by_key("14Rn-yawMAO_L5BNiEsg6EZwgQ3nggxS9raGqLDIU2o0")
@@ -94,7 +94,7 @@ def load_all_sheets():
         spreadsheet = client.open("Ch1")
         
     # C1~C7 시트 로드
-    sheet_names = ["C1", "C2", "C3", "C4", "C5", "C6", "C7"]
+    sheet_names = ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
     dfs = {}
     
     for name in sheet_names:
@@ -107,6 +107,25 @@ def load_all_sheets():
             dfs[name.lower()] = pd.DataFrame()
             
     return dfs
+
+
+# ISO 주차 기준 월요일 ~ 일요일 날짜 범위 구하는 함수
+def get_iso_week_dates(year, week):
+  # ISO 8601 기준 해당 주차의 첫 번째 날(월요일)을 구함
+  first_day_of_year = datetime(year, 1, 4)  # ISO 주차의 기준점
+  start_of_week = (
+      first_day_of_year
+      - timedelta(days=first_day_of_year.weekday())
+      + timedelta(weeks=week - 1)
+  )
+  end_of_week = start_of_week + timedelta(days=6)
+
+  # MM/DD 형식 포맷팅
+  start_str = start_of_week.strftime("%m/%d")
+  end_str = end_of_week.strftime("%m/%d")
+
+  return f"{start_str} ~ {end_str}"
+
 
 
 # --- 이하 대시보드 UI/차트 코드 ---
@@ -201,8 +220,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 주차 헤더
-st.markdown(f"<h5 style='font-size:24px; font-weight:600;'>📅 {selected_week}주차의 전국 실적</h5>", unsafe_allow_html=True)
+week_date_range = get_iso_week_dates(iso_year, selected_week)
 
+st.markdown(
+    f"<h5 style='font-size:24px; font-weight:600;'>📅 {selected_week}주차의 전국"
+    f" 실적 <span style='font-size:18px; color:#555555;"
+    f" font-weight:normal;'>({week_date_range})</span></h5>",
+    unsafe_allow_html=True,
+)
 # =========================================================
 # KPI 계산 함수들
 # =========================================================
