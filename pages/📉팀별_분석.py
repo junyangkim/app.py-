@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
+from functools import lru_cache
 
 # =========================================================
 # 데이터 로드 (세션 상태 확인)
@@ -207,7 +208,7 @@ with st.sidebar:
 
 
 # =========================================================
-# 상부영역: 주차별 전국 평균 (소수점 2째 자리 적용)
+# ******* 본문 **** 상부영역 전국평균 
 # =========================================================
 selected_weeks = list(range(start_w, end_w + 1))
 
@@ -377,202 +378,166 @@ if selected_regions:
 
 
 # =========================================================
-# 하부영역: 팀별 요약 및 하이라이트
+# 팀별 요약 및 하이라이트 (캐싱 적용)
 # =========================================================
+
+
+# KPI 계산 캐싱 버전 -- 여기 수정 
+@st.cache_data(ttl=3600)  # 10분 동안 캐싱
+def calc_kpi_metrics_cached(week, region_filter=None, team_filter=None):
+    return calc_kpi_metrics(week, region_filter, team_filter)
+
 filtered_teams = []
 if "팀" in c1_df.columns:
-  if selected_regions:
-    filtered_teams = (
-        c1_df[c1_df["권역"].isin(selected_regions)]["팀"]
-        .dropna()
-        .unique()
-        .tolist()
-    )
-  else:
-    filtered_teams = c1_df["팀"].dropna().unique().tolist()
+    if selected_regions:
+        filtered_teams = (
+            c1_df[c1_df["권역"].isin(selected_regions)]["팀"]
+            .dropna()
+            .unique()
+            .tolist()
+        )
+    else:
+        filtered_teams = c1_df["팀"].dropna().unique().tolist()
 
 rows = []
 for team in filtered_teams:
-  for metric_label in ["정시배송율", "미납율", "미오출율", "VOC 실적"]:
-    row = {"팀": team, "항목": metric_label}
-    for w in selected_weeks:
-      m_val = calc_kpi_metrics(
-          w, region_filter=selected_regions, team_filter=team
-      )
-      row[f"{w}주차"] = m_val[metric_label]
-    rows.append(row)
+    for metric_label in ["정시배송율", "미납율", "미오출율", "VOC 실적"]:
+        row = {"팀": team, "항목": metric_label}
+        for w in selected_weeks:
+            # ✅ 캐싱된 함수 사용
+            m_val = calc_kpi_metrics_cached(
+                w, region_filter=selected_regions, team_filter=team
+            )
+            row[f"{w}주차"] = m_val[metric_label]
+        rows.append(row)
 
 team_summary = pd.DataFrame(rows)
 
 if not team_summary.empty:
-  st.markdown("---")
-  st.markdown("### 🏢 팀별 요약")
+    st.markdown("---")
+    st.markdown("### 🏢 팀별 요약")
 
-  metric_order = ["정시배송율", "미납율", "미오출율", "VOC 실적"]
-  team_summary["항목"] = pd.Categorical(
-      team_summary["항목"], categories=metric_order, ordered=True
-  )
-  team_summary = team_summary.sort_values(["팀", "항목"])
+    metric_order = ["정시배송율", "미납율", "미오출율", "VOC 실적"]
+    team_summary["항목"] = pd.Categorical(
+        team_summary["항목"], categories=metric_order, ordered=True
+    )
+    team_summary = team_summary.sort_values(["팀", "항목"])
 
-  display_df = team_summary.copy()
+    display_df = team_summary.copy()
+    display_df = display_df.replace(["None", "nan", "NaN", None, ""], np.nan)
 
-  # 💡 [핵심 수정 1] 데이터프레임 내의 모든 None/nan 문자열/빈값을 np.nan으로 통일
-  display_df = display_df.replace(["None", "nan", "NaN", None, ""], np.nan)
+    avg_dict = summary_df.set_index("주차").to_dict()
+    metrics_list = display_df["항목"].tolist()
 
-  avg_dict = summary_df.set_index("주차").to_dict()
-  metrics_list = display_df["항목"].tolist()
+    display_df["팀"] = display_df["팀"].fillna("").astype(str)
+    display_df.loc[display_df.duplicated(subset=["팀"], keep="first"), "팀"] = ""
 
-  # 팀명 중복 병합 시각화 처리
-  display_df["팀"] = display_df["팀"].fillna("").astype(str)
-  display_df.loc[display_df.duplicated(subset=["팀"], keep="first"), "팀"] = ""
+    # 하이라이트 스타일 함수 (기존 그대로)
+    def highlight_cells(col_data):
+        column_name = col_data.name
+        if "주차" not in column_name:
+            return [""] * len(col_data)
 
-  # 하이라이트 스타일 함수
-  def highlight_cells(col_data):
-    column_name = col_data.name
-    if "주차" not in column_name:
-      return [""] * len(col_data)
+        week_num = int(column_name.replace("주차", ""))
+        styles = []
 
-    week_num = int(column_name.replace("주차", ""))
-    styles = []
+        for idx, val in enumerate(col_data):
+            metric = metrics_list[idx]
+            target_avg = avg_dict.get(metric, {}).get(week_num, np.nan)
 
-    for idx, val in enumerate(col_data):
-      metric = metrics_list[idx]
-      target_avg = avg_dict.get(metric, {}).get(week_num, np.nan)
+            if pd.notna(val) and pd.notna(target_avg):
+                val_f = float(val)
+                avg_f = float(target_avg)
+                if metric == "정시배송율" and val_f < avg_f:
+                    styles.append(
+                        "background-color: #FEE2E2; color: #991B1B; text-align: center;"
+                    )
+                elif metric in ["미납율", "미오출율", "VOC 실적"] and val_f > avg_f:
+                    styles.append(
+                        "background-color: #FEE2E2; color: #991B1B; text-align: center;"
+                    )
+                else:
+                    styles.append("text-align: center;")
+            else:
+                styles.append("text-align: center;")
+        return styles
 
-      if pd.notna(val) and pd.notna(target_avg):
-        val_f = float(val)
-        avg_f = float(target_avg)
-        if metric == "정시배송율" and val_f < avg_f:
-          styles.append(
-              "background-color: #FEE2E2; color: #991B1B; text-align: center;"
-          )
-        elif metric in ["미납율", "미오출율", "VOC 실적"] and val_f > avg_f:
-          styles.append(
-              "background-color: #FEE2E2; color: #991B1B; text-align: center;"
-          )
-        else:
-          styles.append("text-align: center;")
-      else:
-        styles.append("text-align: center;")
-    return styles
+    ratio_idx = display_df["항목"].isin(["정시배송율", "미납율", "미오출율"])
+    weeks_cols = [col for col in display_df.columns if "주차" in col]
 
-  ratio_idx = display_df["항목"].isin(["정시배송율", "미납율", "미오출율"])
-  weeks_cols = [col for col in display_df.columns if "주차" in col]
+    styled_table = (
+        display_df.style.set_properties(**{"text-align": "center"})
+        .set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
+        .apply(highlight_cells, axis=0)
+        .format(
+            lambda v: f"{float(v):.2f}%" if pd.notna(v) else "-",
+            subset=(ratio_idx, weeks_cols),
+            na_rep="-",
+        )
+        .format(
+            lambda v: f"{int(float(v))}" if pd.notna(v) else "-",
+            subset=(~ratio_idx, weeks_cols),
+            na_rep="-",
+        )
+    )
 
-  # 💡 [핵심 수정 2] na_rep="-"을 통해 모든 결측값을 '-'로 완벽 처리
-  styled_table = (
-      display_df.style.set_properties(**{"text-align": "center"})
-      .set_table_styles([{"selector": "th", "props": [("text-align", "center")]}])
-      .apply(highlight_cells, axis=0)
-      .format(
-          lambda v: f"{float(v):.2f}%" if pd.notna(v) else "-",
-          subset=(ratio_idx, weeks_cols),
-          na_rep="-",
-      )
-      .format(
-          lambda v: f"{int(float(v))}" if pd.notna(v) else "-",
-          subset=(~ratio_idx, weeks_cols),
-          na_rep="-",
-      )
-  )
-
-  st.dataframe(
-      styled_table,
-      use_container_width=True,
-      hide_index=True,
-      column_config=col_config,
-  )
+    st.dataframe(
+        styled_table,
+        use_container_width=True,
+        hide_index=True,
+        column_config=col_config,
+    )
 
 
-# =========================================================
 # 📊 [시각화] 전국평균 vs 선택 팀 4대 지표 트렌드 비교 차트
-# =========================================================
-st.markdown("---")
-st.markdown(
-    "<h3 style='font-size: 1.5rem; font-weight: bold; margin-bottom: 0rem;'>📈"
-    " 주요 지표별 추이 상세 분석</h3>",
-    unsafe_allow_html=True,
-)
-
 if filtered_teams:
-  selected_team_for_chart = st.selectbox(
-      "🎯 트렌드 분석을 진행할 팀을 선택하세요",
-      options=filtered_teams,
-      key="global_team_chart_selector",
-  )
+    selected_team_for_chart = st.selectbox(
+        "🎯 트렌드 분석을 진행할 팀을 선택하세요",
+        options=filtered_teams,
+        key="global_team_chart_selector",
+    )
 
-  avg_trend_df = summary_df.set_index("주차")
+    avg_trend_df = summary_df.set_index("주차")
 
-  metrics_config = [
-      {
-          "name": "정시배송율",
-          "title": "정시배송율 (%)",
-          "is_pct": True,
-          "unit": "%",
-          "color": "#1E3A8A",
-      },
-      {
-          "name": "미납율",
-          "title": "미납율 (%)",
-          "is_pct": True,
-          "unit": "%",
-          "color": "#EA580C",
-      },
-      {
-          "name": "미오출율",
-          "title": "미오출율 (%)",
-          "is_pct": True,
-          "unit": "%",
-          "color": "#D97706",
-      },
-      {
-          "name": "VOC 실적",
-          "title": "VOC 건수 (건)",
-          "is_pct": False,
-          "unit": "건",
-          "color": "#DC2626",
-      },
-  ]
-
-  for m in metrics_config:
-    m_key = m["name"]
-    avg_series = avg_trend_df[m_key]
-
-    team_trend_vals = [
-        calc_kpi_metrics(
-            w, region_filter=selected_regions, team_filter=selected_team_for_chart
-        )[m_key]
-        for w in selected_weeks
+    metrics_config = [
+        {"name": "정시배송율", "title": "정시배송율 (%)", "is_pct": True, "unit": "%", "color": "#1E3A8A"},
+        {"name": "미납율", "title": "미납율 (%)", "is_pct": True, "unit": "%", "color": "#EA580C"},
+        {"name": "미오출율", "title": "미오출율 (%)", "is_pct": True, "unit": "%", "color": "#D97706"},
+        {"name": "VOC 실적", "title": "VOC 건수 (건)", "is_pct": False, "unit": "건", "color": "#DC2626"},
     ]
 
-    fig = go.Figure()
-    unit = m["unit"]
+    for m in metrics_config:
+        m_key = m["name"]
+        avg_series = avg_trend_df[m_key]
 
-    # 1. 전국 평균 선
-    avg_vals = [avg_series.get(w, np.nan) for w in selected_weeks]
-    avg_fmt = "%{y:.2f}" + unit if m["is_pct"] else "%{y:.0f}" + unit
+        # ✅ 캐싱된 함수 사용
+        team_trend_vals = [
+            calc_kpi_metrics_cached(w, region_filter=selected_regions, team_filter=selected_team_for_chart)[m_key]
+            for w in selected_weeks
+        ]
 
-    fig.add_trace(
-        go.Scatter(
+        fig = go.Figure()
+        unit = m["unit"]
+
+        avg_vals = [avg_series.get(w, np.nan) for w in selected_weeks]
+        avg_fmt = "%{y:.2f}" + unit if m["is_pct"] else "%{y:.0f}" + unit
+
+        fig.add_trace(go.Scatter(
             x=[f"W{w:02d}" for w in selected_weeks],
             y=avg_vals,
             mode="lines+markers",
             name="전국 평균",
             line=dict(color="gray", dash="dash", width=2),
             hovertemplate=f"전국 평균: <b>{avg_fmt}</b><extra></extra>",
-        )
-    )
+        ))
 
-    # 2. 선택 팀 선
-    text_labels = [
-        (f"{v:.2f}%" if m["is_pct"] else f"{int(v)}건") if pd.notna(v) else ""
-        for v in team_trend_vals
-    ]
+        text_labels = [
+            (f"{v:.2f}%" if m["is_pct"] else f"{int(v)}건") if pd.notna(v) else ""
+            for v in team_trend_vals
+        ]
+        team_fmt = "%{y:.2f}" + unit if m["is_pct"] else "%{y:.0f}" + unit
 
-    team_fmt = "%{y:.2f}" + unit if m["is_pct"] else "%{y:.0f}" + unit
-
-    fig.add_trace(
-        go.Scatter(
+        fig.add_trace(go.Scatter(
             x=[f"W{w:02d}" for w in selected_weeks],
             y=team_trend_vals,
             mode="lines+markers+text",
@@ -580,27 +545,17 @@ if filtered_teams:
             text=text_labels,
             textposition="top center",
             line=dict(color=m["color"], width=3),
-            hovertemplate=(
-                f"{selected_team_for_chart}: <b>{team_fmt}</b><extra></extra>"
-            ),
+            hovertemplate=f"{selected_team_for_chart}: <b>{team_fmt}</b><extra></extra>",
+        ))
+
+        fig.update_layout(
+            title=f"<b>[{selected_team_for_chart}] vs 전국 평균 {m_key} 비교</b>",
+            xaxis_title="조회 주차",
+            yaxis_title=m["title"],
+            hovermode="x unified",
+            height=350,
+            margin=dict(l=20, r=20, t=50, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-    )
 
-    fig.update_layout(
-        title=(
-            f"<b>[{selected_team_for_chart}] vs 전국 평균 {m_key} 비교</b>"
-        ),
-        xaxis_title="조회 주차",
-        yaxis_title=m["title"],
-        hovermode="x unified",
-        height=350,
-        margin=dict(l=20, r=20, t=50, b=20),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-        ),
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-else:
-  st.warning("조회된 팀 데이터가 없어 차트를 생성할 수 없습니다.")
+        st.plotly_chart(fig, use_container_width=True)
