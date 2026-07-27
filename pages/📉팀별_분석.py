@@ -544,6 +544,7 @@ if filtered_teams:
             name=selected_team_for_chart,
             text=text_labels,
             textposition="top center",
+            textfont=dict(color=m["color"], size=12),
             line=dict(color=m["color"], width=3),
             hovertemplate=f"{selected_team_for_chart}: <b>{team_fmt}</b><extra></extra>",
         ))
