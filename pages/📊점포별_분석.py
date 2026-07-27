@@ -477,31 +477,47 @@ with right_col:
         s_avg_ns = df_store_kpi["미오출율"].mean(skipna=True)
         s_sum_voc = df_store_kpi["VOC실적"].sum(skipna=True)
 
-        diff_on_time = s_avg_otd - avg_otd if (pd.notna(s_avg_otd) and pd.notna(avg_otd)) else None
-        diff_non_pay = s_avg_np - avg_np if (pd.notna(s_avg_np) and pd.notna(avg_np)) else None
-        diff_non_ship = s_avg_ns - avg_ns if (pd.notna(s_avg_ns) and pd.notna(avg_ns)) else None
+        # ---------------------------------------------------------
+        # 💡 
+        # ---------------------------------------------------------
+        s_avg_otd_r = round(s_avg_otd, 2) if pd.notna(s_avg_otd) else None
+        avg_otd_r = round(avg_otd, 2) if pd.notna(avg_otd) else None
 
+        s_avg_np_r = round(s_avg_np, 2) if pd.notna(s_avg_np) else None
+        avg_np_r = round(avg_np, 2) if pd.notna(avg_np) else None
+
+        s_avg_ns_r = round(s_avg_ns, 2) if pd.notna(s_avg_ns) else None
+        avg_ns_r = round(avg_ns, 2) if pd.notna(avg_ns) else None
+
+        diff_on_time = (s_avg_otd_r - avg_otd_r) if (s_avg_otd_r is not None and avg_otd_r is not None) else None
+        diff_non_pay = (s_avg_np_r - avg_np_r) if (s_avg_np_r is not None and avg_np_r is not None) else None
+        diff_non_ship = (s_avg_ns_r - avg_ns_r) if (s_avg_ns_r is not None and avg_ns_r is not None) else None
+
+        # ---------------------------------------------------------
+        # 메트릭 출력
+        # ---------------------------------------------------------
         col1_s.metric(
             "정시배송율",
             f"{s_avg_otd:.2f}%" if pd.notna(s_avg_otd) else "-",
-            delta=f"{diff_on_time:+.2f}%p (전국누적평균比)" if diff_on_time is not None else None,
+            delta=f"{diff_on_time:+.2f}%p (전국누적평균비)" if diff_on_time is not None else None,
         )
         col2_s.metric(
             "미납율",
             f"{s_avg_np:.2f}%" if pd.notna(s_avg_np) else "-",
-            delta=f"{diff_non_pay:+.2f}%p (전국누적평균比)" if diff_non_pay is not None else None,
+            delta=f"{diff_non_pay:+.2f}%p (전국누적평균비)" if diff_non_pay is not None else None,
             delta_color="inverse",
         )
         col3_s.metric(
             "미오출율",
             f"{s_avg_ns:.2f}%" if pd.notna(s_avg_ns) else "-",
-            delta=f"{diff_non_ship:+.2f}%p (전국누적평균比)" if diff_non_ship is not None else None,
+            delta=f"{diff_non_ship:+.2f}%p (전국누적평균비)" if diff_non_ship is not None else None,
             delta_color="inverse",
         )
         col4_s.metric(
             "VOC 실적(합계)",
             f"{int(s_sum_voc):,}건" if pd.notna(s_sum_voc) else "0건",
         )
+   
 
         tab1, tab2, tab3 = st.tabs(
             [
