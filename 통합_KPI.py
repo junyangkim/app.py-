@@ -131,8 +131,10 @@ def get_iso_week_dates(year, week):
 # --- 이하 대시보드 UI/차트 코드 ---
 iso_year, iso_week, iso_weekday = datetime.now().isocalendar()
 
-# N-1 주차 계산
-default_week = iso_week - 1 if iso_week > 1 else 52
+# ✅ 오늘 기준 ISO-week의 2주 전 고정
+default_week = iso_week - 2
+if default_week <= 0:
+    default_week += 52   # ISO-week는 1~52 범위이므로 보정
 
 with st.sidebar:
     st.markdown("## ⚙️ 분석 필터 셋팅")
@@ -145,8 +147,8 @@ with st.sidebar:
         selected_week = st.selectbox(
             "조회 주차 선택",
             options=list(range(1, 53)),
-            index=default_week - 1, 
-            format_func=lambda x: f" 제 {x}주차 (W{x:02d})"
+            index=default_week - 1,  
+            format_func=lambda w: f" 제 {w}주차 ({get_iso_week_dates(iso_year, w)})"
         )
 
         if selected_week == default_week:
