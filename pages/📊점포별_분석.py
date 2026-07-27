@@ -499,18 +499,18 @@ with right_col:
         col1_s.metric(
             "정시배송율",
             f"{s_avg_otd:.2f}%" if pd.notna(s_avg_otd) else "-",
-            delta=f"{diff_on_time:+.2f}%p (전국누적평균비)" if diff_on_time is not None else None,
+            delta=f"{diff_on_time:+.2f}%p (전국누적比)" if diff_on_time is not None else None,
         )
         col2_s.metric(
             "미납율",
             f"{s_avg_np:.2f}%" if pd.notna(s_avg_np) else "-",
-            delta=f"{diff_non_pay:+.2f}%p (전국누적평균비)" if diff_non_pay is not None else None,
+            delta=f"{diff_non_pay:+.2f}%p (전국누적比)" if diff_non_pay is not None else None,
             delta_color="inverse",
         )
         col3_s.metric(
             "미오출율",
             f"{s_avg_ns:.2f}%" if pd.notna(s_avg_ns) else "-",
-            delta=f"{diff_non_ship:+.2f}%p (전국누적평균비)" if diff_non_ship is not None else None,
+            delta=f"{diff_non_ship:+.2f}%p (전국누적比)" if diff_non_ship is not None else None,
             delta_color="inverse",
         )
         col4_s.metric(
