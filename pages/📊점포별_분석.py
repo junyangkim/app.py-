@@ -643,7 +643,7 @@ with right_col:
                     xanchor="right",
                     x=1,
                 ),
-                yaxis=dict(range=[0, 20]),
+                yaxis=dict(range=[0, 2]),
                 xaxis=dict(type="category", tickangle=0, dtick=1),
             )
             st.plotly_chart(fig_store_non, use_container_width=True)
