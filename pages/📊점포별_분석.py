@@ -109,11 +109,11 @@ def get_week_col_name(df, week):
 
 
 # =========================================================
-# 2. 주차 범위 자동 계산 (오늘 날짜 기준 ISO 주차 - 2)
+# 2. 주차 범위 자동 계산 (오늘 날짜 기준 ISO 주차 - 1)
 # =========================================================
 start_w = 1
 current_iso_week = datetime.now().isocalendar()[1]
-latest_w = max(1, current_iso_week - 2)  # 🎯 W-2 로 변경
+latest_w = max(1, current_iso_week - 1)  # W-1 적용
 
 selected_weeks = list(range(start_w, latest_w + 1))
 
@@ -190,8 +190,8 @@ def calculate_kpi(c1, c2, c3, c4, c5, c7, store_name=None):
     return pd.DataFrame({
         "주차": selected_weeks,
         "정시배송율": on_time,
-        "미납율": non_pay,
-        "미오출율": non_ship,
+        "점포미납율": non_pay,
+        "점포미오출율": non_ship,  # 🎯 명칭 변경
         "VOC실적": voc,
     })
 
@@ -224,13 +224,13 @@ def get_top_5_voc_stores(c4_df, weeks):
 
 def get_top_5_non_ship_stores(c3_df, c7_df, weeks):
     if c3_df.empty or c7_df.empty:
-        return pd.DataFrame(columns=["순위", "점포명", "미오출율"])
+        return pd.DataFrame(columns=["순위", "점포명", "점포미오출율"])
 
     store_col_c3 = next((col for col in ["점포명", "점포"] if col in c3_df.columns), None)
     store_col_c7 = next((col for col in ["점포명", "점포"] if col in c7_df.columns), None)
 
     if not store_col_c3 or not store_col_c7:
-        return pd.DataFrame(columns=["순위", "점포명", "미오출율"])
+        return pd.DataFrame(columns=["순위", "점포명", "점포미오출율"])
 
     week_cols_c3 = [get_week_col_name(c3_df, w) for w in weeks if get_week_col_name(c3_df, w)]
     week_cols_c7 = [get_week_col_name(c7_df, w) for w in weeks if get_week_col_name(c7_df, w)]
@@ -252,13 +252,13 @@ def get_top_5_non_ship_stores(c3_df, c7_df, weeks):
     merged = pd.merge(sum_c3, sum_c7, left_on=store_col_c3, right_on=store_col_c7, how="inner")
 
     merged = merged[merged["총_C3"] > 0].copy()
-    merged["미오출율"] = ((merged["총_C3"] - merged["총_C7"]) / merged["총_C3"]) * 100
+    merged["점포미오출율"] = ((merged["총_C3"] - merged["총_C7"]) / merged["총_C3"]) * 100  # 🎯 명칭 변경
 
-    top_5 = merged.sort_values(by="미오출율", ascending=False).head(5).reset_index(drop=True)
+    top_5 = merged.sort_values(by="점포미오출율", ascending=False).head(5).reset_index(drop=True)
     top_5.index = top_5.index + 1
     top_5 = top_5.reset_index().rename(columns={"index": "순위", store_col_c3: "점포명"})
 
-    return top_5[["순위", "점포명", "미오출율"]]
+    return top_5[["순위", "점포명", "점포미오출율"]]
 
 
 df_all_kpi = calculate_kpi(c1_df, c2_df, c3_df, c4_df, c5_df, c7_df)
@@ -408,8 +408,30 @@ with map_col:
             m.location = [store_lat, store_lng]
             m.zoom_start = 11
 
+    # 💡 지도 내부 우측 하단 범례(Legend) HTML 추가
+    legend_html = """
+    <div style="
+        position: fixed; 
+        bottom: 30px; right: 20px; width: 130px; height: 65px; 
+        background-color: white; z-index:9999; font-size:12px;
+        border:2px solid #cccccc; border-radius: 8px; padding: 8px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    ">
+        <div style="margin-bottom: 4px; display: flex; align-items: center;">
+            <span style="display:inline-block; width:20px; border-bottom: 3px solid #2563eb; margin-right:8px;"></span>
+            <span style="font-weight:bold; color:#333;">실선: 상온센터</span>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <span style="display:inline-block; width:20px; border-bottom: 3px dashed #9333ea; margin-right:8px;"></span>
+            <span style="font-weight:bold; color:#333;">점선: 저온센터</span>
+        </div>
+    </div>
+    """
+    m.get_root().html.add_child(folium.Element(legend_html))
+
     st_folium(m, width="100%", height=820, returned_objects=[])
 
+    
 # ---------------------------------------------------------
 # 📊 [우측 컬럼] KPI 실적 및 Top 5
 # ---------------------------------------------------------
@@ -420,20 +442,20 @@ with right_col:
 
     col1, col2, col3, col4 = st.columns(4)
     avg_otd = df_all_kpi["정시배송율"].mean(skipna=True)
-    avg_np = df_all_kpi["미납율"].mean(skipna=True)
-    avg_ns = df_all_kpi["미오출율"].mean(skipna=True)
+    avg_np = df_all_kpi["점포미납율"].mean(skipna=True)
+    avg_ns = df_all_kpi["점포미오출율"].mean(skipna=True)  # 🎯 명칭 변경
     sum_voc = df_all_kpi["VOC실적"].sum(skipna=True)
 
     col1.metric("정시배송율", f"{avg_otd:.2f}%" if pd.notna(avg_otd) else "-")
-    col2.metric("미납율", f"{avg_np:.2f}%" if pd.notna(avg_np) else "-")
-    col3.metric("미오출율", f"{avg_ns:.2f}%" if pd.notna(avg_ns) else "-")
+    col2.metric("점포미납율", f"{avg_np:.2f}%" if pd.notna(avg_np) else "-")
+    col3.metric("점포미오출율", f"{avg_ns:.2f}%" if pd.notna(avg_ns) else "-")  # 🎯 명칭 변경
     col4.metric("VOC 실적(합계)", f"{int(sum_voc):,}건" if pd.notna(sum_voc) else "-")
 
     with st.expander(
         f"🏆 **[누적 Top 5] 주요 관리 점포 현황 (1 ~ {latest_w}주차)**",
         expanded=True,
     ):
-        top5_tab1, top5_tab2 = st.tabs(["🚨 VOC 접수 Top 5", "⚠️ 미오출율 최고  Top 5"])
+        top5_tab1, top5_tab2 = st.tabs(["🚨 VOC 접수 Top 5", "⚠️ 점포미오출율 최고 Top 5"])  # 🎯 명칭 변경
 
         with top5_tab1:
             if not df_top5_voc.empty:
@@ -459,11 +481,11 @@ with right_col:
                     column_config={
                         "순위": st.column_config.NumberColumn("순위", format="%d위", alignment="center"),
                         "점포명": st.column_config.TextColumn("점포명", alignment="center"),
-                        "미오출율": st.column_config.NumberColumn("미오출율", format="%.2f%%", alignment="center"),
+                        "점포미오출율": st.column_config.NumberColumn("점포미오출율", format="%.2f%%", alignment="center"),  # 🎯 명칭 변경
                     },
                 )
             else:
-                st.write("표시할 미오출율 데이터가 없습니다.")
+                st.write("표시할 점포미오출율 데이터가 없습니다.")
 
     st.divider()
 
@@ -473,13 +495,10 @@ with right_col:
         col1_s, col2_s, col3_s, col4_s = st.columns(4)
 
         s_avg_otd = df_store_kpi["정시배송율"].mean(skipna=True)
-        s_avg_np = df_store_kpi["미납율"].mean(skipna=True)
-        s_avg_ns = df_store_kpi["미오출율"].mean(skipna=True)
+        s_avg_np = df_store_kpi["점포미납율"].mean(skipna=True)
+        s_avg_ns = df_store_kpi["점포미오출율"].mean(skipna=True)  # 🎯 명칭 변경
         s_sum_voc = df_store_kpi["VOC실적"].sum(skipna=True)
 
-        # ---------------------------------------------------------
-        # 💡 
-        # ---------------------------------------------------------
         s_avg_otd_r = round(s_avg_otd, 2) if pd.notna(s_avg_otd) else None
         avg_otd_r = round(avg_otd, 2) if pd.notna(avg_otd) else None
 
@@ -502,13 +521,13 @@ with right_col:
             delta=f"{diff_on_time:+.2f}%p (전국누적比)" if diff_on_time is not None else None,
         )
         col2_s.metric(
-            "미납율",
+            "점포미납율",
             f"{s_avg_np:.2f}%" if pd.notna(s_avg_np) else "-",
             delta=f"{diff_non_pay:+.2f}%p (전국누적比)" if diff_non_pay is not None else None,
             delta_color="inverse",
         )
         col3_s.metric(
-            "미오출율",
+            "점포미오출율",  # 🎯 명칭 변경
             f"{s_avg_ns:.2f}%" if pd.notna(s_avg_ns) else "-",
             delta=f"{diff_non_ship:+.2f}%p (전국누적比)" if diff_non_ship is not None else None,
             delta_color="inverse",
@@ -517,13 +536,12 @@ with right_col:
             "VOC 실적(합계)",
             f"{int(s_sum_voc):,}건" if pd.notna(s_sum_voc) else "0건",
         )
-   
 
         tab1, tab2, tab3 = st.tabs(
             [
                 "📈 정시배송율 추이 (%)",
                 "🚨 VOC 발생 추이 (건)",
-                "📉 미오출율·미납율 추이 (%)",
+                "📉 점포미오출율·점포미납율 추이 (%)",  # 🎯 명칭 변경
             ]
         )
 
@@ -589,28 +607,28 @@ with right_col:
             st.plotly_chart(fig_store_voc, use_container_width=True)
 
         # ---------------------------------------------------------
-        # Tab 3: 미오출율 및 미납율 추이 (%)
+        # Tab 3: 점포미오출율 및 점포미납율 추이 (%)
         # ---------------------------------------------------------
         with tab3:
             fig_store_non = go.Figure()
             fig_store_non.add_trace(
                 go.Scatter(
                     x=week_labels,
-                    y=df_store_kpi["미오출율"],
+                    y=df_store_kpi["점포미오출율"],  # 🎯 명칭 변경
                     mode="lines+markers",
-                    name="미오출율",
+                    name="점포미오출율",  # 🎯 명칭 변경
                     line=dict(color="#ef4444", width=2),
-                    hovertemplate="미오출율: <b>%{y:.2f}%</b><extra></extra>",
+                    hovertemplate="점포미오출율: <b>%{y:.2f}%</b><extra></extra>",  # 🎯 명칭 변경
                 )
             )
             fig_store_non.add_trace(
                 go.Scatter(
                     x=week_labels,
-                    y=df_store_kpi["미납율"],
+                    y=df_store_kpi["점포미납율"],
                     mode="lines+markers",
-                    name="미납율",
+                    name="점포미납율",
                     line=dict(color="#163cf9", width=2),
-                    hovertemplate="미납율: <b>%{y:.2f}%</b><extra></extra>",
+                    hovertemplate="점포미납율: <b>%{y:.2f}%</b><extra></extra>",
                 )
             )
 
