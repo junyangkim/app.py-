@@ -131,8 +131,8 @@ def get_iso_week_dates(year, week):
 # --- 이하 대시보드 UI/차트 코드 ---
 iso_year, iso_week, iso_weekday = datetime.now().isocalendar()
 
-# ✅ 오늘 기준 ISO-week의 2주 전 고정
-default_week = iso_week - 2
+# ✅ 오늘 기준 ISO-week의 고정 -n 
+default_week = iso_week -1  
 if default_week <= 0:
     default_week += 52   # ISO-week는 1~52 범위이므로 보정
 
@@ -228,6 +228,12 @@ st.markdown(
     f"<h5 style='font-size:24px; font-weight:600;'>📅 {selected_week}주차의 전국"
     f" 실적 <span style='font-size:18px; color:#555555;"
     f" font-weight:normal;'>({week_date_range})</span></h5>",
+    unsafe_allow_html=True,
+)
+
+# 👇 안내 문구 추가
+st.markdown(
+    "<p style='font-size:14px; color:#777777; font-style:italic;'>신규 주차 실적은 매주 수요일 업데이트 됩니다.</p>",
     unsafe_allow_html=True,
 )
 # =========================================================
@@ -373,7 +379,7 @@ with row1_col2:
         f"""
         <div style="padding: 2px 0px 8px 0px;">
             <div style="font-size: 20px; font-weight: 700; color: #31333F; margin-bottom: 6px;">
-                ⚠️ 미납율
+                ⚠️ 점포미납율
             </div>
             <div style="display: flex; align-items: baseline; gap: 12px;">
                 <span style="font-size: 34px; font-weight: 700; color: #000000; line-height: 1;">
@@ -526,19 +532,29 @@ with bottom_col1:
 
     # 데이터프레임 생성 (소수점 둘째 자리 반영)
     df_view = pd.DataFrame({
-        "주차": [f"{w}주차" for w in valid_weeks],
-        "정시배송율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_otd],
-        "미납율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_stockout],
-        "미오출율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_mis],
-        "VOC 실적": [f"{int(v)}건" if pd.notna(v) and v is not None else "-" for v in weekly_voc]
+    "주차": [f"{w}주차 ({get_iso_week_dates(iso_year, w)})" for w in valid_weeks],
+    "정시배송율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_otd],
+    "점포미납율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_stockout],
+    "미오출율": [f"{v:.2f}%" if pd.notna(v) and v is not None else "-" for v in weekly_mis],
+    "VOC 실적": [f"{int(v)}건" if pd.notna(v) and v is not None else "-" for v in weekly_voc]
     })
 
+# ✅ 실적 있는 주차만 필터링
+    df_view = df_view[~df_view.eq("-").any(axis=1)]
+
+# ✅ 주차 숫자 컬럼 추가
+    df_view["주차_num"] = df_view["주차"].str.extract(r'(\d+)').astype(int)
+
+# ✅ 최신 주차가 맨 위로 오도록 내림차순 정렬
+    df_view = df_view.sort_values(by="주차_num", ascending=False).drop(columns="주차_num")
+
+# ✅ 최신 주차가 맨 위로 오도록 내림차순 정렬
     target_week_label = f"{selected_week}주차"
     
     def highlight_selected_row(row):
-        if row["주차"] == target_week_label:
+       if target_week_label in row["주차"]:   # ✅ 포함 여부로 체크
             return ['background-color: #FFF59D; font-weight: bold; color: #000000;'] * len(row)
-        return [''] * len(row)
+       return [''] * len(row)
 
     styled_df = df_view.style.apply(highlight_selected_row, axis=1)
     column_configurations = {col: st.column_config.Column(alignment="center") for col in df_view.columns}
@@ -596,7 +612,7 @@ with bottom_col2:
     card_row1_col1, card_row1_col2, card_row1_col3, card_row1_col4 = st.columns(4)
     # 소수점 둘째 자리 반영
     with card_row1_col1: st.metric("정시배송(전체평균)", f"{avg_ontime:.2f}%")
-    with card_row1_col2: st.metric("미납율(전체평균)", f"{avg_non_delivery:.2f}%")
+    with card_row1_col2: st.metric("점포미납율(전체평균)", f"{avg_non_delivery:.2f}%")
     with card_row1_col3: st.metric("미오출율(전체평균)", f"{avg_mis_delivery:.2f}%")
     with card_row1_col4: st.metric("VOC(전체합계)", f"{int(sum_voc_total):,}건")
 
@@ -633,8 +649,8 @@ with bottom_col2:
         st.markdown(f'<div class="metric-card-best"><div class="card-title"> 정시배송 Best</div><div class="card-value">{best_1}</div><div class="card-week">📅 {best_1_1}주차</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 정시배송 Worst</div><div class="card-value">{worst_1}</div><div class="card-week">📅 {worst_1_1}주차</div></div>', unsafe_allow_html=True)
     with col2:
-        st.markdown(f'<div class="metric-card-best"><div class="card-title"> 미납율 Best</div><div class="card-value">{best_2}</div><div class="card-week">📅 {best_2_1}주차</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 미납율 Worst</div><div class="card-value">{worst_2}</div><div class="card-week">📅 {worst_2_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-best"><div class="card-title"> 점포미납율 Best</div><div class="card-value">{best_2}</div><div class="card-week">📅 {best_2_1}주차</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 점포미납율 Worst</div><div class="card-value">{worst_2}</div><div class="card-week">📅 {worst_2_1}주차</div></div>', unsafe_allow_html=True)
     with col3:
         st.markdown(f'<div class="metric-card-best"><div class="card-title"> 미오출율 Best</div><div class="card-value">{best_3}</div><div class="card-week">📅 {best_3_1}주차</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="metric-card-worst"><div class="card-title"> 미오출율 Worst</div><div class="card-value">{worst_3}</div><div class="card-week">📅 {worst_3_1}주차</div></div>', unsafe_allow_html=True)
